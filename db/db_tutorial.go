@@ -36,12 +36,7 @@ func Run(argc int, argv ...string) int {
 }
 
 func newInputBuffer() *InputBuffer {
-	inputBuffer := new(InputBuffer)
-	inputBuffer.buffer = make([]byte, 0)
-	inputBuffer.bufferLength = 0
-	inputBuffer.inputBufferLength = 0
-
-	return inputBuffer
+	return new(InputBuffer)
 }
 
 func printPromt() {
@@ -49,9 +44,9 @@ func printPromt() {
 }
 
 func readInput(inputBuffer *InputBuffer) bool {
-	n, err := fmt.Scanf("%s\n", &inputBuffer.buffer)
+	n, err := fmt.Scan("%s\n", &inputBuffer.buffer)
 	if err != nil {
-		fmt.Printf("Scanned nothing: %s\n", err)
+		fmt.Printf("Scan with err: %s\n", err)
 	}
 	return n != 0
 }
