@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -46,7 +47,7 @@ type InputBuffer struct {
 func Run(argc int, argv ...string) int {
 	var inputBuffer = newInputBuffer()
 	for {
-		printPromt()
+		printPrompt()
 		readInput(inputBuffer)
 		// if strings.TrimSpace(string(inputBuffer.buffer))[:5] == ".exit" {
 		// 	// fmt.Printf("command: %s\n", inputBuffer.buffer)
@@ -76,14 +77,13 @@ func Run(argc int, argv ...string) int {
 		executeCommand(&statement)
 		fmt.Println("Executed.")
 	}
-	return 0
 }
 
 func newInputBuffer() *InputBuffer {
 	return new(InputBuffer)
 }
 
-func printPromt() {
+func printPrompt() {
 	fmt.Print("db > ")
 }
 
@@ -102,7 +102,7 @@ func closeInputBuffer(inputBuffer *InputBuffer) int {
 
 func doMetaCommand(inputBuffer *InputBuffer) MetaCommandResult {
 	if strings.TrimSpace(string(inputBuffer.buffer))[:5] == ".exit" {
-		return MetaCommandSuccess
+		os.Exit(ExitSuccess)
 	}
 	return MetaCommandUnrecognizedCommand
 }
