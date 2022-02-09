@@ -3,11 +3,15 @@ package db
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
+	"unsafe"
 )
 
 const (
-	ExitSuccess int = 0
+	ExitSuccess        int = 0
+	ColumnUsernameSize int = 32
+	ColumnEmailSize    int = 255
 )
 
 type MetaCommandResult int
@@ -28,20 +32,81 @@ type PrepareResult int
 
 const (
 	PrepareSuccess PrepareResult = iota
+	PrepareSyntaxError
 	PrepareUnrecognizedStatement
 )
 
 type Statement struct {
-	stype StatementType
+	sType       StatementType
+	rowToInsert Row
 }
 
+type ExecuteResult int
+
+const (
+	ExecuteSuccess ExecuteResult = iota
+	ExecuteTableFull
+)
+
+type Row struct {
+	id       uint32                   `name:"id"`
+	username [ColumnUsernameSize]byte `name:"username"`
+	email    [ColumnEmailSize]byte    `name:"email"`
+}
 type size_t uint
 type ssize_t int
+type uint32_t uint32
 
 type InputBuffer struct {
 	buffer            []byte
 	bufferLength      size_t
 	inputBufferLength ssize_t
+}
+
+func sizeOfAttribute(Struct interface{}, Attribute string) uint32_t {
+	return unsafe.Sizeof(reflect.TypeOf(Struct).FieldByName(Attribute))
+}
+
+var IdSize = sizeOfAttribute(Row{}, "id")
+var UsernameSize = sizeOfAttribute(Row{}, "username")
+var EmailSize = sizeOfAttribute(Row{}, "email")
+var IdOffset = uint32_t(0)
+var UsernameOffset = IdOffset + IdSize
+var EmailOffset = UsernameOffset + UsernameSize
+var RowSize = IdSize + UsernameSize + EmailSize
+
+const (
+	TableMaxPages uint32_t = 100
+	PageSize      uint32_t = 4096
+)
+
+var RowsPerPage = PageSize / uint32_t(RowSize)
+var TableMaxRows = TableMaxPages * RowsPerPage
+
+type Table struct {
+	numRows uint32_t
+	pages   [TableMaxPages]uintptr
+}
+
+func (row Row) printRow() {
+	fmt.Printf("%d %s %s", row.id, row.username, row.email)
+}
+
+func (row *Row) serializeRow(destination unsafe.Pointer) {
+	memcpy(destination+IdOffset, unsafe.Pointer(&row.id), uint(IdSize))
+	memcpy(destination+UsernameOffset, unsafe.Pointer(&row.username), uint(UsernameOffset))
+	memcpy(destination+EmailOffset, unsafe.Pointer(&row.email), uint(EmailOffset))
+}
+
+func (table *Table) rowSlot(rowNum uint32_t) {
+	pageNum := rowNum / RowsPerPage
+	page := table.pages[pageNum]
+	if page == 0 {
+		table.pages[pageNum] = uintptr(unsafe.Pointer([RowsPerPage]Row))
+	}
+}
+func memcpy(dest unsafe.Pointer, origin unsafe.Pointer, n uint) {
+	copy(([]byte)(dest), ([n]byte)(origin))
 }
 
 func Run(argc int, argv ...string) int {
@@ -109,18 +174,18 @@ func doMetaCommand(inputBuffer *InputBuffer) MetaCommandResult {
 
 func prepareStatement(inputBuffer *InputBuffer, statement *Statement) PrepareResult {
 	if strings.TrimSpace(string(inputBuffer.buffer))[:6] == "insert" {
-		statement.stype = StatementInsert
+		statement.sType = StatementInsert
 		return PrepareSuccess
 	}
 	if strings.TrimSpace(string(inputBuffer.buffer))[:6] == "select" {
-		statement.stype = StatementSelect
+		statement.sType = StatementSelect
 		return PrepareSuccess
 	}
 	return PrepareUnrecognizedStatement
 }
 
 func executeCommand(statement *Statement) {
-	switch statement.stype {
+	switch statement.sType {
 	case StatementInsert:
 		fmt.Printf("This is where we would do an insert.\n")
 		break
