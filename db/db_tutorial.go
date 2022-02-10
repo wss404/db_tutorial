@@ -63,13 +63,13 @@ type InputBuffer struct {
 	inputBufferLength ssize_t
 }
 
-func sizeOfAttribute(Struct interface{}, Attribute string) uint32_t {
-	return unsafe.Sizeof(reflect.TypeOf(Struct).FieldByName(Attribute))
-}
+//func sizeOfAttribute(Struct interface{}, Attribute string) uint32_t {
+//	return unsafe.Sizeof(reflect.TypeOf(Struct).FieldByName(Attribute))
+//}
 
-var IdSize = sizeOfAttribute(Row{}, "id")
-var UsernameSize = sizeOfAttribute(Row{}, "username")
-var EmailSize = sizeOfAttribute(Row{}, "email")
+var IdSize = uint32_t(unsafe.Sizeof(Row{}.id))
+var UsernameSize = uint32_t(unsafe.Sizeof(Row{}.username))
+var EmailSize = uint32_t(unsafe.Sizeof(Row{}.email))
 var IdOffset = uint32_t(0)
 var UsernameOffset = IdOffset + IdSize
 var EmailOffset = UsernameOffset + UsernameSize
@@ -92,36 +92,28 @@ func (row Row) printRow() {
 	fmt.Printf("%d %s %s", row.id, row.username, row.email)
 }
 
-func (row *Row) serializeRow(destination unsafe.Pointer) {
-	memcpy(destination+IdOffset, unsafe.Pointer(&row.id), uint(IdSize))
-	memcpy(destination+UsernameOffset, unsafe.Pointer(&row.username), uint(UsernameOffset))
-	memcpy(destination+EmailOffset, unsafe.Pointer(&row.email), uint(EmailOffset))
-}
+//func (row *Row) serializeRow(destination unsafe.Pointer) {
+//	memcpy(destination+IdOffset, unsafe.Pointer(&row.id), uint(IdSize))
+//	memcpy(destination+UsernameOffset, unsafe.Pointer(&row.username), uint(UsernameOffset))
+//	memcpy(destination+EmailOffset, unsafe.Pointer(&row.email), uint(EmailOffset))
+//}
 
-func (table *Table) rowSlot(rowNum uint32_t) {
+func (table *Table) rowSlot(rowNum uint32_t, rowsPerPage int) {
 	pageNum := rowNum / RowsPerPage
 	page := table.pages[pageNum]
 	if page == 0 {
-		table.pages[pageNum] = uintptr(unsafe.Pointer([RowsPerPage]Row))
+		table.pages[pageNum] = uintptr(unsafe.Pointer([rowsPerPage]Row))
 	}
 }
-func memcpy(dest unsafe.Pointer, origin unsafe.Pointer, n uint) {
-	copy(([]byte)(dest), ([n]byte)(origin))
-}
+//func memcpy(dest unsafe.Pointer, origin unsafe.Pointer, n uint) {
+//	copy(([]byte)(dest), ([n]byte)(origin))
+//}
 
 func Run(argc int, argv ...string) int {
 	var inputBuffer = newInputBuffer()
 	for {
 		printPrompt()
 		readInput(inputBuffer)
-		// if strings.TrimSpace(string(inputBuffer.buffer))[:5] == ".exit" {
-		// 	// fmt.Printf("command: %s\n", inputBuffer.buffer)
-		// 	closeInputBuffer(inputBuffer)
-		// 	os.Exit(ExitSuccess)
-		// } else {
-		// 	fmt.Printf("Unrecognized Commands: %s\n", inputBuffer.buffer)
-		// 	break
-		// }
 		if inputBuffer.buffer[0] == '.' {
 			switch doMetaCommand(inputBuffer) {
 			case MetaCommandSuccess:
