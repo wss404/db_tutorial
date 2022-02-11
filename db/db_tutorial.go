@@ -1,12 +1,16 @@
 package db
 
 import (
+	"bufio"
 	"fmt"
 	"os"
-	"reflect"
 	"strings"
 	"unsafe"
 )
+
+type size_t uint
+type ssize_t int
+type uint32_t uint32
 
 const (
 	ExitSuccess        int = 0
@@ -46,95 +50,76 @@ type ExecuteResult int
 const (
 	ExecuteSuccess ExecuteResult = iota
 	ExecuteTableFull
+	ExecuteStatementTypeUnrecognized
 )
+
+type InputBuffer struct {
+	buffer            []byte
+}
+
+const (
+	IdSize = uint32_t(unsafe.Sizeof(Row{}.id))
+	UsernameSize = uint32_t(unsafe.Sizeof(Row{}.username))
+	EmailSize = uint32_t(unsafe.Sizeof(Row{}.email))
+	IdOffset = uint32_t(0)
+	UsernameOffset = IdOffset + IdSize
+	EmailOffset = UsernameOffset + UsernameSize
+	RowSize = IdSize + UsernameSize + EmailSize
+
+	TableMaxPages uint32_t = 100
+	PageSize      uint32_t = 4096
+	RowsPerPage = PageSize / RowSize
+	TableMaxRows = TableMaxPages * RowsPerPage
+)
+
+type Table struct {
+	numRows uint32_t
+	pages   [TableMaxPages]*Page
+}
+
+type Page struct {
+	numRows uint32_t
+	rows [RowsPerPage]Row
+}
 
 type Row struct {
 	id       uint32                   `name:"id"`
 	username [ColumnUsernameSize]byte `name:"username"`
 	email    [ColumnEmailSize]byte    `name:"email"`
 }
-type size_t uint
-type ssize_t int
-type uint32_t uint32
 
-type InputBuffer struct {
-	buffer            []byte
-	bufferLength      size_t
-	inputBufferLength ssize_t
-}
-
-//func sizeOfAttribute(Struct interface{}, Attribute string) uint32_t {
-//	return unsafe.Sizeof(reflect.TypeOf(Struct).FieldByName(Attribute))
-//}
-
-var IdSize = uint32_t(unsafe.Sizeof(Row{}.id))
-var UsernameSize = uint32_t(unsafe.Sizeof(Row{}.username))
-var EmailSize = uint32_t(unsafe.Sizeof(Row{}.email))
-var IdOffset = uint32_t(0)
-var UsernameOffset = IdOffset + IdSize
-var EmailOffset = UsernameOffset + UsernameSize
-var RowSize = IdSize + UsernameSize + EmailSize
-
-const (
-	TableMaxPages uint32_t = 100
-	PageSize      uint32_t = 4096
-)
-
-var RowsPerPage = PageSize / uint32_t(RowSize)
-var TableMaxRows = TableMaxPages * RowsPerPage
-
-type Table struct {
-	numRows uint32_t
-	pages   [TableMaxPages]uintptr
+func newTable() *Table {
+	return new(Table)
 }
 
 func (row Row) printRow() {
-	fmt.Printf("%d %s %s", row.id, row.username, row.email)
+	fmt.Printf("%d %s %s\n", row.id, row.username, row.email)
 }
 
-//func (row *Row) serializeRow(destination unsafe.Pointer) {
-//	memcpy(destination+IdOffset, unsafe.Pointer(&row.id), uint(IdSize))
-//	memcpy(destination+UsernameOffset, unsafe.Pointer(&row.username), uint(UsernameOffset))
-//	memcpy(destination+EmailOffset, unsafe.Pointer(&row.email), uint(EmailOffset))
-//}
+func (row *Row) serializeRow(destination unsafe.Pointer) {
+	copy(((*[RowSize]byte)(destination))[:],
+		((*[RowSize]byte)(unsafe.Pointer(row)))[:])
+}
 
-func (table *Table) rowSlot(rowNum uint32_t, rowsPerPage int) {
+func (row *Row) deSerializeRow(source unsafe.Pointer) {
+	copy(((*[RowSize]byte)(unsafe.Pointer(row)))[:],
+		((*[RowSize]byte)(source))[:])
+}
+
+func (table *Table) rowSlot(rowNum uint32_t) uintptr {
 	pageNum := rowNum / RowsPerPage
 	page := table.pages[pageNum]
-	if page == 0 {
-		table.pages[pageNum] = uintptr(unsafe.Pointer([rowsPerPage]Row))
+	if page == nil {
+		page = new(Page)
+		table.pages[pageNum] = page
 	}
+	rowOffset := rowNum % RowsPerPage
+	byteOffset := rowOffset * RowSize
+	return uintptr(unsafe.Pointer(page)) + uintptr(byteOffset)
 }
 //func memcpy(dest unsafe.Pointer, origin unsafe.Pointer, n uint) {
 //	copy(([]byte)(dest), ([n]byte)(origin))
 //}
-
-func Run(argc int, argv ...string) int {
-	var inputBuffer = newInputBuffer()
-	for {
-		printPrompt()
-		readInput(inputBuffer)
-		if inputBuffer.buffer[0] == '.' {
-			switch doMetaCommand(inputBuffer) {
-			case MetaCommandSuccess:
-				continue
-			case MetaCommandUnrecognizedCommand:
-				fmt.Printf("Unrecognized command '%s'\n", inputBuffer.buffer)
-				continue
-			}
-		}
-		var statement Statement
-		switch prepareStatement(inputBuffer, &statement) {
-		case PrepareSuccess:
-			break
-		case PrepareUnrecognizedStatement:
-			fmt.Printf("Unrecognized keyword at start of '%s'.\n", inputBuffer.buffer)
-			continue
-		}
-		executeCommand(&statement)
-		fmt.Println("Executed.")
-	}
-}
 
 func newInputBuffer() *InputBuffer {
 	return new(InputBuffer)
@@ -144,45 +129,129 @@ func printPrompt() {
 	fmt.Print("db > ")
 }
 
-func readInput(inputBuffer *InputBuffer) bool {
-	n, err := fmt.Scan(&inputBuffer.buffer)
+func readInput(inputBuffer *InputBuffer) {
+	inputReader := bufio.NewReader(os.Stdin)
+	input, err := inputReader.ReadBytes('\n')
 	if err != nil {
-		fmt.Printf("Scan with err: %s\n", err)
+		fmt.Printf("readInput with err: %s\n", err)
 	}
-	return n != 0
+	inputBuffer.buffer = input
 }
 
-func closeInputBuffer(inputBuffer *InputBuffer) int {
-	fmt.Println("Buffer Freed!")
-	return 0
+func (inputBuffer *InputBuffer) free() {
+	fmt.Println("Buffer Freed.")
+	return
 }
 
-func doMetaCommand(inputBuffer *InputBuffer) MetaCommandResult {
+func (table *Table) free(){
+	fmt.Println("table freed.")
+}
+
+func doMetaCommand(inputBuffer *InputBuffer, table *Table) MetaCommandResult {
 	if strings.TrimSpace(string(inputBuffer.buffer))[:5] == ".exit" {
+		inputBuffer.free()
+		table.free()
 		os.Exit(ExitSuccess)
 	}
 	return MetaCommandUnrecognizedCommand
 }
 
 func prepareStatement(inputBuffer *InputBuffer, statement *Statement) PrepareResult {
-	if strings.TrimSpace(string(inputBuffer.buffer))[:6] == "insert" {
-		statement.sType = StatementInsert
-		return PrepareSuccess
-	}
-	if strings.TrimSpace(string(inputBuffer.buffer))[:6] == "select" {
-		statement.sType = StatementSelect
-		return PrepareSuccess
+	bufferContent := strings.TrimSpace(string(inputBuffer.buffer))
+	var id uint32
+	var username, email string
+	if len(bufferContent) >= 6 {
+		switch bufferContent[:6] {
+		case "insert":
+			statement.sType = StatementInsert
+			n, err := fmt.Sscanf(bufferContent,
+				"insert %d %s %s",
+				&id, &username, &email)
+			if err != nil || n < 3{
+				fmt.Printf("prepare insert failed: %s\n", err)
+				return PrepareSyntaxError
+			}
+			statement.rowToInsert.id = id
+			for i := 0; i<len(username); i++{
+				statement.rowToInsert.username[i] = username[i]
+			}
+			for i :=0; i<len(email);i++{
+				statement.rowToInsert.email[i] = email[i]
+			}
+			return PrepareSuccess
+		case "select":
+			statement.sType = StatementSelect
+			return PrepareSuccess
+		}
 	}
 	return PrepareUnrecognizedStatement
 }
 
-func executeCommand(statement *Statement) {
+func executeStatement(statement *Statement, table *Table) ExecuteResult{
 	switch statement.sType {
 	case StatementInsert:
-		fmt.Printf("This is where we would do an insert.\n")
-		break
+		return statement.executeInsert(table)
 	case StatementSelect:
-		fmt.Printf("This is where we would do a select.\n")
-		break
+		return statement.executeSelect(table)
+	}
+	return ExecuteStatementTypeUnrecognized
+}
+
+func (statement *Statement) executeInsert(table *Table) ExecuteResult {
+	if table.numRows >= TableMaxRows{
+		return ExecuteTableFull
+	}
+	rowToInsert := statement.rowToInsert
+	rowToInsert.serializeRow(unsafe.Pointer(table.rowSlot(table.numRows)))
+	table.numRows += 1
+
+	return ExecuteSuccess
+}
+
+func (statement *Statement) executeSelect(table *Table) ExecuteResult {
+	var row Row
+	for i := uint32_t(0); i< table.numRows; i++ {
+		row.deSerializeRow(unsafe.Pointer(table.rowSlot(i)))
+		row.printRow()
+	}
+	return ExecuteSuccess
+}
+
+func Run(argc int, argv ...string) int {
+	var inputBuffer = newInputBuffer()
+	var table = newTable()
+
+	for {
+		printPrompt()
+		readInput(inputBuffer)
+
+		if inputBuffer.buffer[0] == '.' {
+			switch doMetaCommand(inputBuffer, table) {
+			case MetaCommandSuccess:
+				continue
+			case MetaCommandUnrecognizedCommand:
+				fmt.Printf("Unrecognized command '%s'\n", inputBuffer.buffer)
+				continue
+			}
+		}
+
+		var statement Statement
+
+		switch prepareStatement(inputBuffer, &statement) {
+		case PrepareSuccess:
+		case PrepareSyntaxError:
+			fmt.Printf("Syntax error. Could not parse statement.\n")
+			continue
+		case PrepareUnrecognizedStatement:
+			fmt.Printf("Unrecognized keyword at start of '%s'.\n", inputBuffer.buffer)
+			continue
+		}
+
+		switch executeStatement(&statement, table) {
+		case ExecuteSuccess:
+			fmt.Println("Executed.")
+		case ExecuteTableFull:
+			fmt.Println("Error: Table full.")
+		}
 	}
 }
