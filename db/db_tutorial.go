@@ -12,7 +12,8 @@ import (
 type uint32_t uint32
 
 const (
-	ExitSuccess        int = 0
+	ExitSuccess        int = iota
+	ExitFailure
 	ColumnUsernameSize int = 32
 	ColumnEmailSize    int = 255
 )
@@ -75,10 +76,16 @@ const (
 
 type Table struct {
 	numRows uint32_t
+	pager *Pager
+}
+
+type Pager struct {
+	fileDescriptor *os.File
+	fileLength uint32_t
 	pages   [TableMaxPages]*Page
 }
 
-type Page struct {
+type Page struct {  // to create a pagesize memory without malloc()
 	numRows uint32_t
 	rows [RowsPerPage]Row
 }
@@ -89,8 +96,37 @@ type Row struct {
 	email    [ColumnEmailSize]byte    `name:"email"`
 }
 
-func newTable() *Table {
-	return new(Table)
+func dbOpen(fileName *string)*Table{
+	pager := pagerOpen(fileName)
+	numRows := pager.fileLength / RowSize
+
+	table := new(Table)
+	table.pager = pager
+	table.numRows = numRows
+	return table
+}
+
+func pagerOpen(fileName *string) *Pager {
+	fd, err := os.OpenFile(*fileName, os.O_RDWR|os.O_CREATE, 0755) //fd实际为file指针，文件描述符用*File.fd()获取
+	if err != nil {
+		fmt.Println("Unable to open file.")
+		os.Exit(ExitFailure)
+	}
+	fileInfo, err := fd.Stat()
+	if err != nil {
+		fmt.Println("Unable to get file info.")
+		os.Exit(ExitFailure)
+	}
+	fileLength := fileInfo.Size()
+
+	pager := new(Pager)
+	pager.fileDescriptor = fd
+	pager.fileLength = uint32_t(fileLength)
+
+	//for i := uint32_t(0); i < TableMaxPages; i++{
+	//	pager.pages[i] = nil
+	//}
+	return pager
 }
 
 func (row Row) printRow() {
@@ -109,14 +145,93 @@ func (row *Row) deSerializeRow(source unsafe.Pointer) {
 
 func (table *Table) rowSlot(rowNum uint32_t) uintptr {
 	pageNum := rowNum / RowsPerPage
-	page := table.pages[pageNum]
-	if page == nil {
-		page = new(Page)
-		table.pages[pageNum] = page
-	}
+	page := table.pager.getPage(pageNum)
+
 	rowOffset := rowNum % RowsPerPage
 	byteOffset := rowOffset * RowSize
 	return uintptr(unsafe.Pointer(page)) + uintptr(byteOffset)
+}
+
+func (p *Pager) getPage(pageNum uint32_t) *Page {
+	if pageNum > TableMaxPages {
+		fmt.Printf("Tried to fetch page number out of bounds. %d > %d\n", pageNum, TableMaxPages)
+		os.Exit(ExitFailure)
+	}
+	if p.pages[pageNum] == nil {
+		page := new(Page)
+		numPages := p.fileLength / PageSize
+
+		if p.fileLength % PageSize != 0 {
+			numPages += 1
+		}
+		if pageNum<numPages {
+			_, err := p.fileDescriptor.Seek(int64(pageNum*PageSize), 0)
+			if err != nil {
+				fmt.Println("Error occurred while moving ptr.")
+				os.Exit(ExitFailure)
+			}
+			b := make([]byte, PageSize)
+			_, err = p.fileDescriptor.Read(b)
+			if err != nil {
+				fmt.Printf("\"Error reading file: %s\n", err)
+				os.Exit(ExitFailure)
+			}
+			copy(((*[PageSize]byte)(unsafe.Pointer(page)))[:], b)
+		}
+		p.pages[pageNum] = page
+	}
+	return p.pages[pageNum]
+}
+
+func (table *Table) dbClose()  {
+	p := table.pager
+	numFullPages := table.numRows / RowsPerPage
+
+	for i:=uint32_t(0); i < numFullPages; i++{
+		if p.pages[i] == nil {
+			continue
+		}
+		p.flush(i,PageSize)
+		p.pages[i] = nil
+	}
+
+	numAdditionalRows := table.numRows%RowsPerPage
+	if numAdditionalRows>0{
+		pageNum := numFullPages
+		if p.pages[pageNum] != nil {
+			p.flush(pageNum, numAdditionalRows*RowSize)
+			p.pages[pageNum] = nil
+		}
+	}
+	err := p.fileDescriptor.Close()
+	if err != nil {
+		fmt.Println("Error closing db file.")
+		os.Exit(ExitFailure)
+	}
+	for i := uint32_t(0); i < TableMaxPages; i++{
+		page := p.pages[i]
+		if page != nil {p.pages[i]=nil}
+	}
+	//p.free()
+	table.free()
+}
+
+func (p *Pager) flush(pageNum, size uint32_t)  {
+	if p.pages[pageNum] == nil {
+		fmt.Printf("Tried to flush null page.\n")
+		os.Exit(ExitFailure)
+	}
+	_, err := p.fileDescriptor.Seek(int64(pageNum*PageSize), 0)
+	if err != nil {
+		fmt.Printf("Error seeking: %s\n", err)
+		os.Exit(ExitFailure)
+	}
+	pageBytesSlice := (*[PageSize]byte)(unsafe.Pointer(p.pages[pageNum]))[:size]
+	_, err = p.fileDescriptor.Write(pageBytesSlice)
+	if err != nil {
+		fmt.Printf("Error writing: %s\n", err)
+		os.Exit(ExitFailure)
+	}
 }
 
 func newInputBuffer() *InputBuffer {
@@ -147,8 +262,7 @@ func (table *Table) free(){
 
 func doMetaCommand(inputBuffer *InputBuffer, table *Table) MetaCommandResult {
 	if strings.TrimSpace(string(inputBuffer.buffer))[:5] == ".exit" {
-		inputBuffer.free()
-		table.free()
+		table.dbClose()
 		os.Exit(ExitSuccess)
 	}
 	return MetaCommandUnrecognizedCommand
@@ -219,8 +333,13 @@ func (statement *Statement) executeSelect(table *Table) ExecuteResult {
 }
 
 func Run(db string) int {
+	if db == "" {
+		fmt.Printf("Must supply a database filename.\n")
+		os.Exit(ExitFailure)
+	}
 	inputBuffer := newInputBuffer()
-	var table = newTable()
+	table := dbOpen(&db)
+
 	for {
 		printPrompt()
 		readInput(inputBuffer)
