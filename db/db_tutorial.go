@@ -96,6 +96,12 @@ type Row struct {
 	email    [ColumnEmailSize]byte    `name:"email"`
 }
 
+type Cursor struct {
+	table *Table
+	rowNum uint32_t
+	endOfTable bool
+}
+
 func dbOpen(fileName *string)*Table{
 	pager := pagerOpen(fileName)
 	numRows := pager.fileLength / RowSize
@@ -123,9 +129,6 @@ func pagerOpen(fileName *string) *Pager {
 	pager.fileDescriptor = fd
 	pager.fileLength = uint32_t(fileLength)
 
-	//for i := uint32_t(0); i < TableMaxPages; i++{
-	//	pager.pages[i] = nil
-	//}
 	return pager
 }
 
@@ -143,9 +146,10 @@ func (row *Row) deSerializeRow(source unsafe.Pointer) {
 		((*[RowSize]byte)(source))[:])
 }
 
-func (table *Table) rowSlot(rowNum uint32_t) uintptr {
+func (c *Cursor) cursorValue() uintptr {
+	rowNum := c.rowNum
 	pageNum := rowNum / RowsPerPage
-	page := table.pager.getPage(pageNum)
+	page := c.table.pager.getPage(pageNum)
 
 	rowOffset := rowNum % RowsPerPage
 	byteOffset := rowOffset * RowSize
@@ -183,9 +187,9 @@ func (p *Pager) getPage(pageNum uint32_t) *Page {
 	return p.pages[pageNum]
 }
 
-func (table *Table) dbClose()  {
-	p := table.pager
-	numFullPages := table.numRows / RowsPerPage
+func (t *Table) dbClose()  {
+	p := t.pager
+	numFullPages := t.numRows / RowsPerPage
 
 	for i:=uint32_t(0); i < numFullPages; i++{
 		if p.pages[i] == nil {
@@ -195,7 +199,7 @@ func (table *Table) dbClose()  {
 		p.pages[i] = nil
 	}
 
-	numAdditionalRows := table.numRows%RowsPerPage
+	numAdditionalRows := t.numRows%RowsPerPage
 	if numAdditionalRows>0{
 		pageNum := numFullPages
 		if p.pages[pageNum] != nil {
@@ -213,7 +217,7 @@ func (table *Table) dbClose()  {
 		if page != nil {p.pages[i]=nil}
 	}
 	//p.free()
-	table.free()
+	t.free()
 }
 
 func (p *Pager) flush(pageNum, size uint32_t)  {
@@ -234,6 +238,29 @@ func (p *Pager) flush(pageNum, size uint32_t)  {
 	}
 }
 
+func (t *Table) tableStart() *Cursor {
+	cursor := new(Cursor)
+	cursor.table = t
+	cursor.rowNum = 0
+	cursor.endOfTable = t.numRows==0
+
+	return cursor
+}
+
+func (t *Table) tableEnd() *Cursor {
+	cursor := new(Cursor)
+	cursor.table = t
+	cursor.rowNum = t.numRows
+	cursor.endOfTable = true
+
+	return cursor
+}
+
+func (c *Cursor) advance()  {
+	c.rowNum += 1
+	c.endOfTable = c.rowNum >= c.table.numRows
+}
+
 func newInputBuffer() *InputBuffer {
 	return new(InputBuffer)
 }
@@ -251,12 +278,12 @@ func readInput(inputBuffer *InputBuffer) {
 	inputBuffer.buffer = input
 }
 
-func (inputBuffer *InputBuffer) free() {
+func (i *InputBuffer) free() {
 	fmt.Println("Buffer Freed.")
 	return
 }
 
-func (table *Table) free(){
+func (t *Table) free(){
 	fmt.Println("Table freed.")
 }
 
@@ -285,20 +312,25 @@ func prepareStatement(inputBuffer *InputBuffer, statement *Statement) PrepareRes
 func prepareInsert(buffer *string, statement *Statement) PrepareResult {
 	var username string
 	var email string
+
 	statement.sType = StatementInsert
 	splitSlice := strings.Split(*buffer, " ")
+
 	if len(splitSlice) != 4 {return PrepareSyntaxError}
 	id , err := strconv.Atoi(splitSlice[1])
 	if err != nil {return PrepareSyntaxError}
 	if id < 0 {return PrepareNegativeId}
+
 	username = splitSlice[2]
 	email = splitSlice[3]
 	if len(username) > ColumnUsernameSize || len(email) > ColumnEmailSize {
 		return PrepareStringTooLong
 	}
+
 	statement.rowToInsert.id = uint32(id)
 	copy(statement.rowToInsert.username[:], username)
 	copy(statement.rowToInsert.email[:], email)
+
 	return PrepareSuccess
 }
 
@@ -312,21 +344,22 @@ func executeStatement(statement *Statement, table *Table) ExecuteResult{
 	return ExecuteStatementTypeUnrecognized
 }
 
-func (statement *Statement) executeInsert(table *Table) ExecuteResult {
+func (s *Statement) executeInsert(table *Table) ExecuteResult {
 	if table.numRows >= TableMaxRows{
 		return ExecuteTableFull
 	}
-	rowToInsert := statement.rowToInsert
-	rowToInsert.serializeRow(unsafe.Pointer(table.rowSlot(table.numRows)))
+	rowToInsert := s.rowToInsert
+	cursor := table.tableEnd()
+	rowToInsert.serializeRow(unsafe.Pointer(cursor.cursorValue()))
 	table.numRows += 1
 
 	return ExecuteSuccess
 }
 
-func (statement *Statement) executeSelect(table *Table) ExecuteResult {
+func (s *Statement) executeSelect(table *Table) ExecuteResult {
 	var row Row
-	for i := uint32_t(0); i< table.numRows; i++ {
-		row.deSerializeRow(unsafe.Pointer(table.rowSlot(i)))
+	for c := table.tableStart(); !c.endOfTable; c.advance() {
+		row.deSerializeRow(unsafe.Pointer(c.cursorValue()))
 		row.printRow()
 	}
 	return ExecuteSuccess
