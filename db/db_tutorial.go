@@ -4,12 +4,11 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"unsafe"
 )
 
-type size_t uint
-type ssize_t int
 type uint32_t uint32
 
 const (
@@ -37,6 +36,8 @@ type PrepareResult int
 const (
 	PrepareSuccess PrepareResult = iota
 	PrepareSyntaxError
+	PrepareStringTooLong
+	PrepareNegativeId
 	PrepareUnrecognizedStatement
 )
 
@@ -93,7 +94,7 @@ func newTable() *Table {
 }
 
 func (row Row) printRow() {
-	fmt.Printf("%d %s %s\n", row.id, row.username, row.email)
+	fmt.Printf("(%d, %s, %s)\n", row.id, row.username, row.email)
 }
 
 func (row *Row) serializeRow(destination unsafe.Pointer) {
@@ -117,9 +118,6 @@ func (table *Table) rowSlot(rowNum uint32_t) uintptr {
 	byteOffset := rowOffset * RowSize
 	return uintptr(unsafe.Pointer(page)) + uintptr(byteOffset)
 }
-//func memcpy(dest unsafe.Pointer, origin unsafe.Pointer, n uint) {
-//	copy(([]byte)(dest), ([n]byte)(origin))
-//}
 
 func newInputBuffer() *InputBuffer {
 	return new(InputBuffer)
@@ -133,7 +131,7 @@ func readInput(inputBuffer *InputBuffer) {
 	inputReader := bufio.NewReader(os.Stdin)
 	input, err := inputReader.ReadBytes('\n')
 	if err != nil {
-		fmt.Printf("readInput with err: %s\n", err)
+		fmt.Printf("ReadInput with err: %s\n", err)
 	}
 	inputBuffer.buffer = input
 }
@@ -144,7 +142,7 @@ func (inputBuffer *InputBuffer) free() {
 }
 
 func (table *Table) free(){
-	fmt.Println("table freed.")
+	fmt.Println("Table freed.")
 }
 
 func doMetaCommand(inputBuffer *InputBuffer, table *Table) MetaCommandResult {
@@ -158,33 +156,36 @@ func doMetaCommand(inputBuffer *InputBuffer, table *Table) MetaCommandResult {
 
 func prepareStatement(inputBuffer *InputBuffer, statement *Statement) PrepareResult {
 	bufferContent := strings.TrimSpace(string(inputBuffer.buffer))
-	var id uint32
-	var username, email string
 	if len(bufferContent) >= 6 {
 		switch bufferContent[:6] {
 		case "insert":
-			statement.sType = StatementInsert
-			n, err := fmt.Sscanf(bufferContent,
-				"insert %d %s %s",
-				&id, &username, &email)
-			if err != nil || n < 3{
-				fmt.Printf("prepare insert failed: %s\n", err)
-				return PrepareSyntaxError
-			}
-			statement.rowToInsert.id = id
-			for i := 0; i<len(username); i++{
-				statement.rowToInsert.username[i] = username[i]
-			}
-			for i :=0; i<len(email);i++{
-				statement.rowToInsert.email[i] = email[i]
-			}
-			return PrepareSuccess
+			return prepareInsert(&bufferContent, statement)
 		case "select":
 			statement.sType = StatementSelect
 			return PrepareSuccess
 		}
 	}
 	return PrepareUnrecognizedStatement
+}
+
+func prepareInsert(buffer *string, statement *Statement) PrepareResult {
+	var username string
+	var email string
+	statement.sType = StatementInsert
+	splitSlice := strings.Split(*buffer, " ")
+	if len(splitSlice) != 4 {return PrepareSyntaxError}
+	id , err := strconv.Atoi(splitSlice[1])
+	if err != nil {return PrepareSyntaxError}
+	if id < 0 {return PrepareNegativeId}
+	username = splitSlice[2]
+	email = splitSlice[3]
+	if len(username) > ColumnUsernameSize || len(email) > ColumnEmailSize {
+		return PrepareStringTooLong
+	}
+	statement.rowToInsert.id = uint32(id)
+	copy(statement.rowToInsert.username[:], username)
+	copy(statement.rowToInsert.email[:], email)
+	return PrepareSuccess
 }
 
 func executeStatement(statement *Statement, table *Table) ExecuteResult{
@@ -217,10 +218,9 @@ func (statement *Statement) executeSelect(table *Table) ExecuteResult {
 	return ExecuteSuccess
 }
 
-func Run(argc int, argv ...string) int {
-	var inputBuffer = newInputBuffer()
+func Run(db string) int {
+	inputBuffer := newInputBuffer()
 	var table = newTable()
-
 	for {
 		printPrompt()
 		readInput(inputBuffer)
@@ -241,6 +241,12 @@ func Run(argc int, argv ...string) int {
 		case PrepareSuccess:
 		case PrepareSyntaxError:
 			fmt.Printf("Syntax error. Could not parse statement.\n")
+			continue
+		case PrepareStringTooLong:
+			fmt.Println(" String is too long.")
+			continue
+		case PrepareNegativeId:
+			fmt.Println("ID must be positive.")
 			continue
 		case PrepareUnrecognizedStatement:
 			fmt.Printf("Unrecognized keyword at start of '%s'.\n", inputBuffer.buffer)

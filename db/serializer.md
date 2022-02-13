@@ -6,7 +6,7 @@ json或xml格式的数据可被各种语言使用
 
 Gob是一种以Go自己的二进制格式序列化和反序列化程序数据的格式
 
-protobuff序列化
+protobuf序列化
 
 boltdb的处理则更为简单粗暴
 ![boltdb](./img.png)
