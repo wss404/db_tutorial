@@ -12,7 +12,7 @@ import (
 type uint32_t uint32
 
 const (
-	ExitSuccess        int = iota
+	ExitSuccess int = iota
 	ExitFailure
 	ColumnUsernameSize int = 32
 	ColumnEmailSize    int = 255
@@ -56,53 +56,53 @@ const (
 )
 
 type InputBuffer struct {
-	buffer            []byte
+	buffer []byte
 }
 
 const (
-	IdSize = uint32_t(unsafe.Sizeof(Row{}.id))
-	UsernameSize = uint32_t(unsafe.Sizeof(Row{}.username))
-	EmailSize = uint32_t(unsafe.Sizeof(Row{}.email))
-	IdOffset = uint32_t(0)
+	IdSize         = uint32_t(unsafe.Sizeof(Row{}.id))
+	UsernameSize   = uint32_t(unsafe.Sizeof(Row{}.username))
+	EmailSize      = uint32_t(unsafe.Sizeof(Row{}.email))
+	IdOffset       = uint32_t(0)
 	UsernameOffset = IdOffset + IdSize
-	EmailOffset = UsernameOffset + UsernameSize
-	RowSize = IdSize + UsernameSize + EmailSize
+	EmailOffset    = UsernameOffset + UsernameSize
+	RowSize        = IdSize + UsernameSize + EmailSize
 
 	TableMaxPages uint32_t = 100
 	PageSize      uint32_t = 4096
-	RowsPerPage = PageSize / RowSize
-	TableMaxRows = TableMaxPages * RowsPerPage
+	RowsPerPage            = PageSize / RowSize
+	TableMaxRows           = TableMaxPages * RowsPerPage
 )
 
 type Table struct {
 	numRows uint32_t
-	pager *Pager
+	pager   *Pager
 }
 
 type Pager struct {
 	fileDescriptor *os.File
-	fileLength uint32_t
-	pages   [TableMaxPages]*Page
+	fileLength     uint32_t
+	pages          [TableMaxPages]*Page
 }
 
-type Page struct {  // to create a pagesize memory without malloc()
+type Page struct { // to create a pagesize memory without malloc()
 	numRows uint32_t
-	rows [RowsPerPage]Row
+	rows    [RowsPerPage]Row
 }
 
 type Row struct {
-	id       uint32                   `name:"id"`
-	username [ColumnUsernameSize]byte `name:"username"`
-	email    [ColumnEmailSize]byte    `name:"email"`
+	id       uint32
+	username [ColumnUsernameSize]byte
+	email    [ColumnEmailSize]byte
 }
 
 type Cursor struct {
-	table *Table
-	rowNum uint32_t
+	table      *Table
+	rowNum     uint32_t
 	endOfTable bool
 }
 
-func dbOpen(fileName *string)*Table{
+func dbOpen(fileName *string) *Table {
 	pager := pagerOpen(fileName)
 	numRows := pager.fileLength / RowSize
 
@@ -165,10 +165,10 @@ func (p *Pager) getPage(pageNum uint32_t) *Page {
 		page := new(Page)
 		numPages := p.fileLength / PageSize
 
-		if p.fileLength % PageSize != 0 {
+		if p.fileLength%PageSize != 0 {
 			numPages += 1
 		}
-		if pageNum<numPages {
+		if pageNum < numPages {
 			_, err := p.fileDescriptor.Seek(int64(pageNum*PageSize), 0)
 			if err != nil {
 				fmt.Println("Error occurred while moving ptr.")
@@ -187,20 +187,20 @@ func (p *Pager) getPage(pageNum uint32_t) *Page {
 	return p.pages[pageNum]
 }
 
-func (t *Table) dbClose()  {
+func (t *Table) dbClose() {
 	p := t.pager
 	numFullPages := t.numRows / RowsPerPage
 
-	for i:=uint32_t(0); i < numFullPages; i++{
+	for i := uint32_t(0); i < numFullPages; i++ {
 		if p.pages[i] == nil {
 			continue
 		}
-		p.flush(i,PageSize)
+		p.flush(i, PageSize)
 		p.pages[i] = nil
 	}
 
-	numAdditionalRows := t.numRows%RowsPerPage
-	if numAdditionalRows>0{
+	numAdditionalRows := t.numRows % RowsPerPage
+	if numAdditionalRows > 0 {
 		pageNum := numFullPages
 		if p.pages[pageNum] != nil {
 			p.flush(pageNum, numAdditionalRows*RowSize)
@@ -212,15 +212,17 @@ func (t *Table) dbClose()  {
 		fmt.Println("Error closing db file.")
 		os.Exit(ExitFailure)
 	}
-	for i := uint32_t(0); i < TableMaxPages; i++{
+	for i := uint32_t(0); i < TableMaxPages; i++ {
 		page := p.pages[i]
-		if page != nil {p.pages[i]=nil}
+		if page != nil {
+			p.pages[i] = nil
+		}
 	}
 	//p.free()
 	t.free()
 }
 
-func (p *Pager) flush(pageNum, size uint32_t)  {
+func (p *Pager) flush(pageNum, size uint32_t) {
 	if p.pages[pageNum] == nil {
 		fmt.Printf("Tried to flush null page.\n")
 		os.Exit(ExitFailure)
@@ -242,7 +244,7 @@ func (t *Table) tableStart() *Cursor {
 	cursor := new(Cursor)
 	cursor.table = t
 	cursor.rowNum = 0
-	cursor.endOfTable = t.numRows==0
+	cursor.endOfTable = t.numRows == 0
 
 	return cursor
 }
@@ -256,7 +258,7 @@ func (t *Table) tableEnd() *Cursor {
 	return cursor
 }
 
-func (c *Cursor) advance()  {
+func (c *Cursor) advance() {
 	c.rowNum += 1
 	c.endOfTable = c.rowNum >= c.table.numRows
 }
@@ -283,7 +285,7 @@ func (i *InputBuffer) free() {
 	return
 }
 
-func (t *Table) free(){
+func (t *Table) free() {
 	fmt.Println("Table freed.")
 }
 
@@ -316,10 +318,16 @@ func prepareInsert(buffer *string, statement *Statement) PrepareResult {
 	statement.sType = StatementInsert
 	splitSlice := strings.Split(*buffer, " ")
 
-	if len(splitSlice) != 4 {return PrepareSyntaxError}
-	id , err := strconv.Atoi(splitSlice[1])
-	if err != nil {return PrepareSyntaxError}
-	if id < 0 {return PrepareNegativeId}
+	if len(splitSlice) != 4 {
+		return PrepareSyntaxError
+	}
+	id, err := strconv.Atoi(splitSlice[1])
+	if err != nil {
+		return PrepareSyntaxError
+	}
+	if id < 0 {
+		return PrepareNegativeId
+	}
 
 	username = splitSlice[2]
 	email = splitSlice[3]
@@ -334,7 +342,7 @@ func prepareInsert(buffer *string, statement *Statement) PrepareResult {
 	return PrepareSuccess
 }
 
-func executeStatement(statement *Statement, table *Table) ExecuteResult{
+func executeStatement(statement *Statement, table *Table) ExecuteResult {
 	switch statement.sType {
 	case StatementInsert:
 		return statement.executeInsert(table)
@@ -345,7 +353,7 @@ func executeStatement(statement *Statement, table *Table) ExecuteResult{
 }
 
 func (s *Statement) executeInsert(table *Table) ExecuteResult {
-	if table.numRows >= TableMaxRows{
+	if table.numRows >= TableMaxRows {
 		return ExecuteTableFull
 	}
 	rowToInsert := s.rowToInsert
