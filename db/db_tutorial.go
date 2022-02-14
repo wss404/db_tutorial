@@ -70,24 +70,23 @@ const (
 
 	TableMaxPages uint32_t = 100
 	PageSize      uint32_t = 4096
-	RowsPerPage            = PageSize / RowSize
-	TableMaxRows           = TableMaxPages * RowsPerPage
 )
 
 type Table struct {
-	numRows uint32_t
+	rootPageNum uint32_t
 	pager   *Pager
 }
 
 type Pager struct {
 	fileDescriptor *os.File
 	fileLength     uint32_t
+	numPages	uint32_t
 	pages          [TableMaxPages]*Page
 }
 
 type Page struct { // to create a pagesize memory without malloc()
 	numRows uint32_t
-	rows    [RowsPerPage]Row
+	rows    []Row
 }
 
 type Row struct {
@@ -98,7 +97,8 @@ type Row struct {
 
 type Cursor struct {
 	table      *Table
-	rowNum     uint32_t
+	pageNum uint32_t
+	cellNum uint32_t
 	endOfTable bool
 }
 
@@ -128,6 +128,11 @@ func pagerOpen(fileName *string) *Pager {
 	pager := new(Pager)
 	pager.fileDescriptor = fd
 	pager.fileLength = uint32_t(fileLength)
+	pager.numPages = uint32_t(fileLength) / PageSize
+	if uint32_t(fileLength) % PageSize != 0 {
+		fmt.Println("Db file is not a whole number of pages. Corrupt file.")
+		os.Exit(ExitFailure)
+	}
 
 	return pager
 }
@@ -183,30 +188,22 @@ func (p *Pager) getPage(pageNum uint32_t) *Page {
 			copy(((*[PageSize]byte)(unsafe.Pointer(page)))[:], b)
 		}
 		p.pages[pageNum] = page
+		if pageNum >= p.numPages { p.numPages = pageNum + 1 }
 	}
 	return p.pages[pageNum]
 }
 
 func (t *Table) dbClose() {
 	p := t.pager
-	numFullPages := t.numRows / RowsPerPage
 
-	for i := uint32_t(0); i < numFullPages; i++ {
+	for i := uint32_t(0); i < p.numPages; i++ {
 		if p.pages[i] == nil {
 			continue
 		}
-		p.flush(i, PageSize)
+		p.flush(i)
 		p.pages[i] = nil
 	}
 
-	numAdditionalRows := t.numRows % RowsPerPage
-	if numAdditionalRows > 0 {
-		pageNum := numFullPages
-		if p.pages[pageNum] != nil {
-			p.flush(pageNum, numAdditionalRows*RowSize)
-			p.pages[pageNum] = nil
-		}
-	}
 	err := p.fileDescriptor.Close()
 	if err != nil {
 		fmt.Println("Error closing db file.")
@@ -222,7 +219,7 @@ func (t *Table) dbClose() {
 	t.free()
 }
 
-func (p *Pager) flush(pageNum, size uint32_t) {
+func (p *Pager) flush(pageNum uint32_t) {
 	if p.pages[pageNum] == nil {
 		fmt.Printf("Tried to flush null page.\n")
 		os.Exit(ExitFailure)
@@ -232,7 +229,7 @@ func (p *Pager) flush(pageNum, size uint32_t) {
 		fmt.Printf("Error seeking: %s\n", err)
 		os.Exit(ExitFailure)
 	}
-	pageBytesSlice := (*[PageSize]byte)(unsafe.Pointer(p.pages[pageNum]))[:size]
+	pageBytesSlice := (*[PageSize]byte)(unsafe.Pointer(p.pages[pageNum]))[:]
 	_, err = p.fileDescriptor.Write(pageBytesSlice)
 	if err != nil {
 		fmt.Printf("Error writing: %s\n", err)
@@ -243,8 +240,11 @@ func (p *Pager) flush(pageNum, size uint32_t) {
 func (t *Table) tableStart() *Cursor {
 	cursor := new(Cursor)
 	cursor.table = t
-	cursor.rowNum = 0
-	cursor.endOfTable = t.numRows == 0
+	cursor.pageNum = t.rootPageNum
+	cursor.cellNum = uint32_t(0)
+
+	rootNode := t.pager.getPage(t.rootPageNum)
+	numCells := rootNode
 
 	return cursor
 }
