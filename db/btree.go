@@ -4,7 +4,7 @@ import (
 	"unsafe"
 )
 
-type NodeType int
+type NodeType uint8_t
 
 const (
 	NodeInternal NodeType = iota
@@ -15,37 +15,37 @@ type uint8_t uint8
 
 /* Common Node Header Layout */
 const (
-	NodeTypeSize         = uint32_t(unsafe.Sizeof(uint8_t(0)))
+	NodeTypeSize                  = uint32_t(unsafe.Sizeof(uint8_t(0)))
 	NodeTypeOffset       uint32_t = 0
-	IsRootSize            = uint32_t(unsafe.Sizeof(uint8_t(0)))
-	IsRootOffset         = NodeTypeSize
-	ParentPointerSize     = uint32_t(unsafe.Sizeof(uint32_t(0)))
-	ParentPointerOffset  = IsRootOffset + IsRootSize
-	CommonNodeHeaderSize = NodeTypeSize + IsRootSize + ParentPointerSize
+	IsRootSize                    = uint32_t(unsafe.Sizeof(uint8_t(0)))
+	IsRootOffset                  = NodeTypeSize
+	ParentPointerSize             = uint32_t(unsafe.Sizeof(uint32_t(0)))
+	ParentPointerOffset           = IsRootOffset + IsRootSize
+	CommonNodeHeaderSize          = NodeTypeSize + IsRootSize + ParentPointerSize
 )
 
 /* Leaf Node Header Layout */
 const (
-	LeafNodeNumCellsSize  = uint32_t(unsafe.Sizeof(uint32_t(0)))
-	LeafNodeNumCellsOffset  = CommonNodeHeaderSize
-	LeafNodeHeaderSize  = CommonNodeHeaderSize + LeafNodeNumCellsSize
+	LeafNodeNumCellsSize   = uint32_t(unsafe.Sizeof(uint32_t(0)))
+	LeafNodeNumCellsOffset = CommonNodeHeaderSize
+	LeafNodeHeaderSize     = CommonNodeHeaderSize + LeafNodeNumCellsSize
 )
 
 /* Leaf Node Body Layout */
 const (
-	LeafNodeKeySize = uint32_t(unsafe.Sizeof(uint32_t(0)))
-	LeafNodeKeyOffset uint32_t = 0
-	LeafNodeValueSize = RowSize
-	LeafNodeValueOffset = LeafNodeKeyOffset + LeafNodeKeySize
-	LeafNodeCellSize = LeafNodeKeySize + LeafNodeValueSize
-	LeafNodeSpaceForCells = PageSize - LeafNodeHeaderSize
-	LeafNodeMaxCells = LeafNodeSpaceForCells / LeafNodeCellSize
+	LeafNodeKeySize                = uint32_t(unsafe.Sizeof(uint32_t(0)))
+	LeafNodeKeyOffset     uint32_t = 0
+	LeafNodeValueSize              = RowSize
+	LeafNodeValueOffset            = LeafNodeKeyOffset + LeafNodeKeySize
+	LeafNodeCellSize               = LeafNodeKeySize + LeafNodeValueSize
+	LeafNodeSpaceForCells          = PageSize - LeafNodeHeaderSize
+	LeafNodeMaxCells               = LeafNodeSpaceForCells / LeafNodeCellSize
 )
 
 type Node struct {
 	// common header
-	nodeType NodeType
-	isRoot uint8_t
+	nodeType      NodeType
+	isRoot        uint8_t
 	parentPointer *Node
 	// leaf node header
 	numCells uint32_t
@@ -54,7 +54,7 @@ type Node struct {
 }
 
 type Cell struct {
-	key uint32_t
+	key   uint32_t
 	value *Row
 }
 

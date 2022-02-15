@@ -74,19 +74,22 @@ const (
 
 type Table struct {
 	rootPageNum uint32_t
-	pager   *Pager
+	pager       *Pager
 }
 
 type Pager struct {
 	fileDescriptor *os.File
 	fileLength     uint32_t
-	numPages	uint32_t
+	numPages       uint32_t
 	pages          [TableMaxPages]*Page
 }
 
 type Page struct { // to create a pagesize memory without malloc()
-	numRows uint32_t
-	rows    []Row
+	nodeType      NodeType
+	isRoot        uint8_t
+	parentPointer *Page
+	numCells      uint32_t
+	cells         []*Cell
 }
 
 type Row struct {
@@ -97,8 +100,8 @@ type Row struct {
 
 type Cursor struct {
 	table      *Table
-	pageNum uint32_t
-	cellNum uint32_t
+	pageNum    uint32_t
+	cellNum    uint32_t
 	endOfTable bool
 }
 
@@ -129,7 +132,7 @@ func pagerOpen(fileName *string) *Pager {
 	pager.fileDescriptor = fd
 	pager.fileLength = uint32_t(fileLength)
 	pager.numPages = uint32_t(fileLength) / PageSize
-	if uint32_t(fileLength) % PageSize != 0 {
+	if uint32_t(fileLength)%PageSize != 0 {
 		fmt.Println("Db file is not a whole number of pages. Corrupt file.")
 		os.Exit(ExitFailure)
 	}
@@ -188,7 +191,9 @@ func (p *Pager) getPage(pageNum uint32_t) *Page {
 			copy(((*[PageSize]byte)(unsafe.Pointer(page)))[:], b)
 		}
 		p.pages[pageNum] = page
-		if pageNum >= p.numPages { p.numPages = pageNum + 1 }
+		if pageNum >= p.numPages {
+			p.numPages = pageNum + 1
+		}
 	}
 	return p.pages[pageNum]
 }
@@ -243,8 +248,15 @@ func (t *Table) tableStart() *Cursor {
 	cursor.pageNum = t.rootPageNum
 	cursor.cellNum = uint32_t(0)
 
-	rootNode := t.pager.getPage(t.rootPageNum)
-	numCells := rootNode
+	rootPage := t.pager.getPage(t.rootPageNum)
+	rootNode := Node{
+		nodeType:      NodeInternal,
+		isRoot:        uint8_t(1),
+		parentPointer: nil,
+		numCells:      rootPage.numCells,
+		cells:         rootPage.cells,
+	}
+	cursor.endOfTable = rootNode.numCells == 0
 
 	return cursor
 }
@@ -252,7 +264,19 @@ func (t *Table) tableStart() *Cursor {
 func (t *Table) tableEnd() *Cursor {
 	cursor := new(Cursor)
 	cursor.table = t
-	cursor.rowNum = t.numRows
+
+	cursor.pageNum = t.rootPageNum
+
+	rootPage := t.pager.getPage(t.rootPageNum)
+	rootNode := Node{
+		nodeType:      NodeInternal,
+		isRoot:        uint8_t(1),
+		parentPointer: nil,
+		numCells:      rootPage.numCells,
+		cells:         rootPage.cells,
+	}
+	numCells := rootNode.leafNodeNumCells()
+	cursor.cellNum = *numCells
 	cursor.endOfTable = true
 
 	return cursor
