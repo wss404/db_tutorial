@@ -52,6 +52,7 @@ type ExecuteResult int
 const (
 	ExecuteSuccess ExecuteResult = iota
 	ExecuteTableFull
+	ExecuteDuplicateKey
 	ExecuteStatementTypeUnrecognized
 )
 
@@ -85,7 +86,7 @@ type Pager struct {
 }
 
 type Page struct { // to create a pagesize memory without malloc()
-	nodeType      PageType
+	pageType      PageType
 	isRoot        uint8_t
 	parentPointer *Page
 	numCells      uint32_t
@@ -268,20 +269,6 @@ func (t *Table) tableStart() *Cursor {
 	return cursor
 }
 
-func (t *Table) tableEnd() *Cursor {
-	cursor := new(Cursor)
-	cursor.table = t
-
-	cursor.pageNum = t.rootPageNum
-
-	rootPage := t.pager.getPage(t.rootPageNum)
-	numCells := *(rootPage.leafNodeNumCells())
-	cursor.cellNum = numCells
-	cursor.endOfTable = true
-
-	return cursor
-}
-
 func (c *Cursor) advance() {
 	pageNum :=c.pageNum
 	page := c.table.pager.getPage(pageNum)
@@ -328,6 +315,7 @@ func doMetaCommand(inputBuffer *InputBuffer, table *Table) MetaCommandResult {
 	} else if strings.TrimSpace(string(inputBuffer.buffer)) == ".btree" {
 		fmt.Println("Tree:")
 		table.pager.getPage(0).printLeafNode()
+		return MetaCommandSuccess
 	}
 	return MetaCommandUnrecognizedCommand
 }
@@ -389,13 +377,21 @@ func executeStatement(statement *Statement, table *Table) ExecuteResult {
 
 func (s *Statement) executeInsert(table *Table) ExecuteResult {
 	page := table.pager.getPage(table.rootPageNum)
-	if *(page.leafNodeNumCells()) >= LeafNodeMaxCells {
+	numCells := *(page.leafNodeNumCells())
+	if numCells >= LeafNodeMaxCells {
 		return ExecuteTableFull
 	}
 
 	rowToInsert := s.rowToInsert
-	cursor := table.tableEnd()
+	keyToInsert := rowToInsert.id
+	cursor := table.find(keyToInsert)
 
+	if cursor.cellNum < numCells {
+		keyAtIndex := *page.leafNodeKey(cursor.cellNum)
+		if keyAtIndex == keyToInsert {
+			return ExecuteDuplicateKey
+		}
+	}
 	cursor.leafNodeInsert(rowToInsert.id, &rowToInsert)
 
 	return ExecuteSuccess
@@ -410,13 +406,59 @@ func (c *Cursor) leafNodeInsert(key uint32_t, value *Row)  {
 	}
 
 	if c.cellNum < numCells {
-		for i := uint32_t(0); i > c.cellNum; i-- {
+		for i := numCells; i > c.cellNum; i-- {
 			page.leafNodeCell(i-1).moveTo(page.leafNodeCell(i))
 		}
 	}
 	*(page.leafNodeNumCells()) += 1
 	*(page.leafNodeKey(c.cellNum)) = key
 	value.serializeRow(unsafe.Pointer(page.leafNodeValue(c.cellNum)))
+}
+
+func (t *Table) find(key uint32_t) *Cursor {
+	rootPageNum := t.rootPageNum
+	rootPage := t.pager.getPage(rootPageNum)
+
+	if rootPage.getPageType() == PageLeaf {
+		return t.leafNodeFind(rootPageNum, key)
+	} else {
+		//fmt.Println("Need to implement searching an internal node.")
+		//os.Exit(ExitFailure)
+		panic("Need to implement searching an internal node.")
+	}
+}
+
+func (p *Page) getPageType() PageType {
+	return p.pageType
+}
+
+func (p *Page) setPageType(t PageType)  {
+	p.pageType = t
+}
+
+func (t *Table) leafNodeFind(pageNum, key uint32_t) *Cursor {
+	page := t.pager.getPage(pageNum)
+	numCells := *(page.leafNodeNumCells())
+
+	cursor := Cursor{table: t, pageNum: pageNum}
+	// Binary search
+	minIndex := uint32_t(0)
+	onePastMaxIndex := numCells
+	for onePastMaxIndex != minIndex {
+		index := (minIndex + onePastMaxIndex) / 2
+		keyAtIndex := *(page.leafNodeKey(index))
+		if key == keyAtIndex {
+			cursor.cellNum = index
+			return &cursor
+		}
+		if key < keyAtIndex {
+			onePastMaxIndex = index
+		} else {
+			minIndex = index + 1
+		}
+	}
+	cursor.cellNum = minIndex
+	return &cursor
 }
 
 func (s *Statement) executeSelect(table *Table) ExecuteResult {
@@ -464,7 +506,8 @@ func Run(db string) int {
 			fmt.Println("ID must be positive.")
 			continue
 		case PrepareUnrecognizedStatement:
-			fmt.Printf("Unrecognized keyword at start of '%s'.\n", inputBuffer.buffer)
+			fmt.Printf("Unrecognized keyword at start of '%s'.\n",
+				strings.TrimSpace(string(inputBuffer.buffer)))
 			continue
 		}
 
@@ -473,6 +516,8 @@ func Run(db string) int {
 			fmt.Println("Executed.")
 		case ExecuteTableFull:
 			fmt.Println("Error: Table full.")
+		case ExecuteDuplicateKey:
+			fmt.Println("Error: Duplicate key.")
 		}
 	}
 }

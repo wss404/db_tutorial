@@ -16,11 +16,11 @@ type uint8_t uint8
 
 /* Common Node Header Layout */
 const (
-	NodeTypeSize                  = uint32_t(unsafe.Sizeof(uint8_t(0)))
+	NodeTypeSize                  = uint32_t(unsafe.Sizeof(PageLeaf))
 	NodeTypeOffset       uint32_t = 0
 	IsRootSize                    = uint32_t(unsafe.Sizeof(uint8_t(0)))
 	IsRootOffset                  = NodeTypeSize
-	ParentPointerSize             = uint32_t(unsafe.Sizeof(uint32_t(0)))
+	ParentPointerSize             = uint32_t(unsafe.Sizeof(uintptr(0)))
 	ParentPointerOffset           = IsRootOffset + IsRootSize
 	CommonNodeHeaderSize          = NodeTypeSize + IsRootSize + ParentPointerSize
 )
@@ -43,24 +43,13 @@ const (
 	LeafNodeMaxCells               = LeafNodeSpaceForCells / LeafNodeCellSize
 )
 
-//type Node struct {
-//	// common header
-//	nodeType      NodeType
-//	isRoot        uint8_t
-//	parentPointer *Node
-//	// leaf node header
-//	numCells uint32_t
-//	// leaf node body
-//	cells []Cell
-//}
-
 type Cell struct {
 	key   uint32_t
 	value Row
 }
 
 func (p *Page) leafNodeNumCells() *uint32_t {
-	if p.nodeType == PageLeaf {
+	if p.pageType == PageLeaf {
 		return &(p.numCells)
 	}
 	panic("trying to get numCells from internal node")
@@ -79,6 +68,7 @@ func (p *Page) leafNodeValue(cellNum uint32_t) *Row {
 }
 
 func (p *Page) initializeLeafNode() {
+	p.setPageType(PageLeaf) // actually, it's not necessary since default PageType is PageLeaf
 	*p.leafNodeNumCells() = 0
 }
 
