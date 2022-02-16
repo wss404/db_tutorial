@@ -85,15 +85,15 @@ type Pager struct {
 }
 
 type Page struct { // to create a pagesize memory without malloc()
-	nodeType      NodeType
+	nodeType      PageType
 	isRoot        uint8_t
 	parentPointer *Page
 	numCells      uint32_t
-	cells         []*Cell
+	cells         [LeafNodeMaxCells]Cell
 }
 
 type Row struct {
-	id       uint32
+	id       uint32_t
 	username [ColumnUsernameSize]byte
 	email    [ColumnEmailSize]byte
 }
@@ -107,12 +107,29 @@ type Cursor struct {
 
 func dbOpen(fileName *string) *Table {
 	pager := pagerOpen(fileName)
-	numRows := pager.fileLength / RowSize
-
+	
 	table := new(Table)
 	table.pager = pager
-	table.numRows = numRows
+	table.rootPageNum = 0
+	if pager.numPages == 0 {
+		rootPage := pager.getPage(0)
+		rootPage.initializeLeafNode()
+	}
 	return table
+}
+
+func printConstants()  {
+	fmt.Printf("ROW_SIZE: %d\n", RowSize)
+	fmt.Printf("COMMON_NODE_HEADER_SIZE: %d\n", CommonNodeHeaderSize)
+	fmt.Printf("LEAF_NODE_HEADER_SIZE: %d\n", LeafNodeHeaderSize)
+	fmt.Printf("LEAF_NODE_CELL_SIZE: %d\n", LeafNodeCellSize)
+	fmt.Printf("LEAF_NODE_SPACE_FOR_CELLS: %d\n", LeafNodeSpaceForCells)
+	fmt.Printf("LEAF_NODE_MAX_CELLS: %d\n", LeafNodeMaxCells)
+}
+
+func (c *Cell) moveTo(dest *Cell)  {
+	copy(((*[LeafNodeCellSize]byte)(unsafe.Pointer(dest)))[:],
+		((*[LeafNodeCellSize]byte)(unsafe.Pointer(c)))[:])
 }
 
 func pagerOpen(fileName *string) *Pager {
@@ -154,14 +171,11 @@ func (row *Row) deSerializeRow(source unsafe.Pointer) {
 		((*[RowSize]byte)(source))[:])
 }
 
-func (c *Cursor) cursorValue() uintptr {
-	rowNum := c.rowNum
-	pageNum := rowNum / RowsPerPage
+func (c *Cursor) cursorValue() *Row {
+	pageNum := c.pageNum
 	page := c.table.pager.getPage(pageNum)
 
-	rowOffset := rowNum % RowsPerPage
-	byteOffset := rowOffset * RowSize
-	return uintptr(unsafe.Pointer(page)) + uintptr(byteOffset)
+	return page.leafNodeValue(c.cellNum)
 }
 
 func (p *Pager) getPage(pageNum uint32_t) *Page {
@@ -249,14 +263,7 @@ func (t *Table) tableStart() *Cursor {
 	cursor.cellNum = uint32_t(0)
 
 	rootPage := t.pager.getPage(t.rootPageNum)
-	rootNode := Node{
-		nodeType:      NodeInternal,
-		isRoot:        uint8_t(1),
-		parentPointer: nil,
-		numCells:      rootPage.numCells,
-		cells:         rootPage.cells,
-	}
-	cursor.endOfTable = rootNode.numCells == 0
+	cursor.endOfTable = rootPage.numCells == 0
 
 	return cursor
 }
@@ -268,23 +275,20 @@ func (t *Table) tableEnd() *Cursor {
 	cursor.pageNum = t.rootPageNum
 
 	rootPage := t.pager.getPage(t.rootPageNum)
-	rootNode := Node{
-		nodeType:      NodeInternal,
-		isRoot:        uint8_t(1),
-		parentPointer: nil,
-		numCells:      rootPage.numCells,
-		cells:         rootPage.cells,
-	}
-	numCells := rootNode.leafNodeNumCells()
-	cursor.cellNum = *numCells
+	numCells := *(rootPage.leafNodeNumCells())
+	cursor.cellNum = numCells
 	cursor.endOfTable = true
 
 	return cursor
 }
 
 func (c *Cursor) advance() {
-	c.rowNum += 1
-	c.endOfTable = c.rowNum >= c.table.numRows
+	pageNum :=c.pageNum
+	page := c.table.pager.getPage(pageNum)
+	c.cellNum += 1
+	if c.cellNum >= *(page.leafNodeNumCells()) {
+		c.endOfTable = true
+	}
 }
 
 func newInputBuffer() *InputBuffer {
@@ -314,9 +318,16 @@ func (t *Table) free() {
 }
 
 func doMetaCommand(inputBuffer *InputBuffer, table *Table) MetaCommandResult {
-	if strings.TrimSpace(string(inputBuffer.buffer))[:5] == ".exit" {
+	if strings.TrimSpace(string(inputBuffer.buffer)) == ".exit" {
 		table.dbClose()
 		os.Exit(ExitSuccess)
+	} else if strings.TrimSpace(string(inputBuffer.buffer)) == ".constants" {
+		fmt.Println("Constants:")
+		printConstants()
+		return MetaCommandSuccess
+	} else if strings.TrimSpace(string(inputBuffer.buffer)) == ".btree" {
+		fmt.Println("Tree:")
+		table.pager.getPage(0).printLeafNode()
 	}
 	return MetaCommandUnrecognizedCommand
 }
@@ -359,7 +370,7 @@ func prepareInsert(buffer *string, statement *Statement) PrepareResult {
 		return PrepareStringTooLong
 	}
 
-	statement.rowToInsert.id = uint32(id)
+	statement.rowToInsert.id = uint32_t(uint32(id))
 	copy(statement.rowToInsert.username[:], username)
 	copy(statement.rowToInsert.email[:], email)
 
@@ -377,15 +388,35 @@ func executeStatement(statement *Statement, table *Table) ExecuteResult {
 }
 
 func (s *Statement) executeInsert(table *Table) ExecuteResult {
-	if table.numRows >= TableMaxRows {
+	page := table.pager.getPage(table.rootPageNum)
+	if *(page.leafNodeNumCells()) >= LeafNodeMaxCells {
 		return ExecuteTableFull
 	}
+
 	rowToInsert := s.rowToInsert
 	cursor := table.tableEnd()
-	rowToInsert.serializeRow(unsafe.Pointer(cursor.cursorValue()))
-	table.numRows += 1
+
+	cursor.leafNodeInsert(rowToInsert.id, &rowToInsert)
 
 	return ExecuteSuccess
+}
+
+func (c *Cursor) leafNodeInsert(key uint32_t, value *Row)  {
+	page := c.table.pager.getPage(c.pageNum)
+	numCells := *page.leafNodeNumCells()
+	if numCells >= LeafNodeMaxCells {
+		fmt.Println("Need to implement splitting a leaf node.")
+		os.Exit(ExitFailure)
+	}
+
+	if c.cellNum < numCells {
+		for i := uint32_t(0); i > c.cellNum; i-- {
+			page.leafNodeCell(i-1).moveTo(page.leafNodeCell(i))
+		}
+	}
+	*(page.leafNodeNumCells()) += 1
+	*(page.leafNodeKey(c.cellNum)) = key
+	value.serializeRow(unsafe.Pointer(page.leafNodeValue(c.cellNum)))
 }
 
 func (s *Statement) executeSelect(table *Table) ExecuteResult {

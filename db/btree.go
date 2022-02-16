@@ -1,14 +1,15 @@
 package db
 
 import (
+	"fmt"
 	"unsafe"
 )
 
-type NodeType uint8_t
+type PageType uint8_t
 
 const (
-	NodeInternal NodeType = iota
-	NodeLeaf
+	PageLeaf PageType = iota
+	PageInternal
 )
 
 type uint8_t uint8
@@ -42,47 +43,50 @@ const (
 	LeafNodeMaxCells               = LeafNodeSpaceForCells / LeafNodeCellSize
 )
 
-type Node struct {
-	// common header
-	nodeType      NodeType
-	isRoot        uint8_t
-	parentPointer *Node
-	// leaf node header
-	numCells uint32_t
-	// leaf node body
-	cells []*Cell
-}
+//type Node struct {
+//	// common header
+//	nodeType      NodeType
+//	isRoot        uint8_t
+//	parentPointer *Node
+//	// leaf node header
+//	numCells uint32_t
+//	// leaf node body
+//	cells []Cell
+//}
 
 type Cell struct {
 	key   uint32_t
-	value *Row
+	value Row
 }
 
-func (n *Node) leafNodeNumCells() *uint32_t {
-	if n.nodeType == NodeLeaf {
-		return &(n.numCells)
+func (p *Page) leafNodeNumCells() *uint32_t {
+	if p.nodeType == PageLeaf {
+		return &(p.numCells)
 	}
 	panic("trying to get numCells from internal node")
 }
 
-func (n *Node) leafNodeCell(cellNum uint32_t) *Cell {
-	if n.numCells != uint32_t(len(n.cells)) {
-		panic("Node data error")
+func (p *Page) leafNodeCell(cellNum uint32_t) *Cell {
+	return &(p.cells[cellNum])
+}
+
+func (p *Page) leafNodeKey(cellNum uint32_t) *uint32_t {
+	return &(p.leafNodeCell(cellNum).key)
+}
+
+func (p *Page) leafNodeValue(cellNum uint32_t) *Row {
+	return &(p.leafNodeCell(cellNum).value)
+}
+
+func (p *Page) initializeLeafNode() {
+	*p.leafNodeNumCells() = 0
+}
+
+func (p *Page) printLeafNode()  {
+	numCells := *p.leafNodeNumCells()
+	fmt.Printf("leaf (size %d)\n", numCells)
+	for i := uint32_t(0); i < numCells; i++ {
+		key := *p.leafNodeKey(i)
+		fmt.Printf("  - %d : %d\n", i, key)
 	}
-	if n.numCells < cellNum {
-		panic("index out of range")
-	}
-	return n.cells[cellNum]
-}
-
-func (n *Node) leafNodeKey(cellNum uint32_t) *uint32_t {
-	return &(n.leafNodeCell(cellNum).key)
-}
-
-func (n *Node) leafNodeValue(cellNum uint32_t) *Row {
-	return n.leafNodeCell(cellNum).value
-}
-
-func (n *Node) initializeLeafNode() {
-	*n.leafNodeNumCells() = 0
 }
