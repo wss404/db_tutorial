@@ -43,6 +43,22 @@ const (
 	LeafNodeMaxCells               = LeafNodeSpaceForCells / LeafNodeCellSize
 )
 
+/* Internal Node Header Layout */
+const (
+	InternalNodeNumKeysSize = uint32_t(unsafe.Sizeof(uint32_t(0)))
+	InternalNodeNumKeysOffset = CommonNodeHeaderSize
+	InternalNodeRightChildSize = uint32_t(unsafe.Sizeof(uintptr(0)))
+	InternalNodeRightChildOffset = InternalNodeNumKeysOffset + InternalNodeNumKeysSize
+	InternalNodeHeaderSize = CommonNodeHeaderSize + InternalNodeNumKeysSize + InternalNodeRightChildSize
+)
+
+/* Internal Node Body Layout */
+const (
+	InternalNodeKeySize = unsafe.Sizeof(uint32_t(0))
+	InternalNodeChildSize = unsafe.Sizeof(uintptr(0))
+	InternalNodeCellSize = InternalNodeKeySize + InternalNodeChildSize
+)
+
 type Cell struct {
 	key   uint32_t
 	value Row

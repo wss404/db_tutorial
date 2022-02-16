@@ -378,9 +378,9 @@ func executeStatement(statement *Statement, table *Table) ExecuteResult {
 func (s *Statement) executeInsert(table *Table) ExecuteResult {
 	page := table.pager.getPage(table.rootPageNum)
 	numCells := *(page.leafNodeNumCells())
-	if numCells >= LeafNodeMaxCells {
-		return ExecuteTableFull
-	}
+	//if numCells >= LeafNodeMaxCells {
+	//	return ExecuteTableFull
+	//}
 
 	rowToInsert := s.rowToInsert
 	keyToInsert := rowToInsert.id
@@ -401,8 +401,10 @@ func (c *Cursor) leafNodeInsert(key uint32_t, value *Row)  {
 	page := c.table.pager.getPage(c.pageNum)
 	numCells := *page.leafNodeNumCells()
 	if numCells >= LeafNodeMaxCells {
-		fmt.Println("Need to implement splitting a leaf node.")
-		os.Exit(ExitFailure)
+		//fmt.Println("Need to implement splitting a leaf node.")
+		//os.Exit(ExitFailure)
+		c.leafNodeSplitAndInsert(key, value)
+		return
 	}
 
 	if c.cellNum < numCells {
