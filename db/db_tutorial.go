@@ -85,18 +85,46 @@ type Pager struct {
 	pages          [TableMaxPages]*Page
 }
 
+type PageHeader struct {
+	pageType      PageType
+	isRoot        uint8_t
+	parentPointer uint32_t
+	numCells      uint32_t
+}
+
 type Page struct { // to create a pagesize memory without malloc()
 	pageType      PageType
 	isRoot        uint8_t
-	parentPointer *Page
+	parentPointer uint32_t
 	numCells      uint32_t
 	cells         [LeafNodeMaxCells]Cell
+}
+
+type LeafPage struct {
+	PageHeader
+	cells [LeafNodeMaxCells]Cell
+}
+
+type InternalPage struct {
+	PageHeader
+	rightChild uint32_t
+	cells [InternalNodeMaxCells]InternalNodeCell
 }
 
 type Row struct {
 	id       uint32_t
 	username [ColumnUsernameSize]byte
 	email    [ColumnEmailSize]byte
+}
+
+type Cell struct {
+	key   uint32_t
+	value Row
+}
+
+type InternalNodeCell struct {
+	value uint32_t
+	key uint32_t
 }
 
 type Cursor struct {
@@ -115,6 +143,7 @@ func dbOpen(fileName *string) *Table {
 	if pager.numPages == 0 {
 		rootPage := pager.getPage(0)
 		rootPage.initializeLeafNode()
+		rootPage.setNodeRoot(true)
 	}
 	return table
 }
@@ -435,6 +464,10 @@ func (p *Page) getPageType() PageType {
 }
 
 func (p *Page) setPageType(t PageType)  {
+	p.pageType = t
+}
+
+func (p *InternalPage) setPageType(t PageType)  {
 	p.pageType = t
 }
 
