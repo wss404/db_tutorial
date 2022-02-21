@@ -92,6 +92,8 @@ type PageHeader struct {
 	numCells      uint32_t
 }
 
+const PageHeaderSize = unsafe.Sizeof(PageHeader{})
+
 type Page struct { // to create a pagesize memory without malloc()
 	pageType      PageType
 	isRoot        uint8_t
@@ -208,38 +210,50 @@ func (c *Cursor) cursorValue() *Row {
 	return page.leafNodeValue(c.cellNum)
 }
 
-func (p *Pager) getPage(pageNum uint32_t) *Page {
+func (p *Pager) getPage(pageNum uint32_t) (PageType, *[PageSize]byte) {
 	if pageNum > TableMaxPages {
 		fmt.Printf("Tried to fetch page number out of bounds. %d > %d\n", pageNum, TableMaxPages)
 		os.Exit(ExitFailure)
 	}
 	if p.pages[pageNum] == nil {
-		page := new(Page)
-		numPages := p.fileLength / PageSize
-
-		if p.fileLength%PageSize != 0 {
-			numPages += 1
+		header, b := p._getPage(pageNum)
+		if header.pageType == PageLeaf{
+			leaf := new(LeafPage)
+			copy(((*[PageSize]byte)(unsafe.Pointer(leaf)))[:], b[:])
+			p.pages[pageNum] = leaf
 		}
-		if pageNum < numPages {
-			_, err := p.fileDescriptor.Seek(int64(pageNum*PageSize), 0)
-			if err != nil {
-				fmt.Println("Error occurred while moving ptr.")
-				os.Exit(ExitFailure)
-			}
-			b := make([]byte, PageSize)
-			_, err = p.fileDescriptor.Read(b)
-			if err != nil {
-				fmt.Printf("\"Error reading file: %s\n", err)
-				os.Exit(ExitFailure)
-			}
-			copy(((*[PageSize]byte)(unsafe.Pointer(page)))[:], b)
-		}
-		p.pages[pageNum] = page
-		if pageNum >= p.numPages {
-			p.numPages = pageNum + 1
-		}
+		return header.pageType, b
 	}
-	return p.pages[pageNum]
+	return p.pages
+
+}
+
+func (p *Pager) _getPage(pageNum uint32_t) (*PageHeader, *[PageSize]byte) {
+	numPages := p.fileLength / PageSize
+	header := new(PageHeader)
+	var pageSlice [PageSize]byte
+	if p.fileLength%PageSize != 0 {
+		numPages += 1
+	}
+	if pageNum < numPages {
+		_, err := p.fileDescriptor.Seek(int64(pageNum*PageSize), 0)
+		if err != nil {
+			fmt.Println("Error occurred while moving ptr.")
+			os.Exit(ExitFailure)
+		}
+		b := make([]byte, PageSize)
+		_, err = p.fileDescriptor.Read(b)
+		if err != nil {
+			fmt.Printf("\"Error reading file: %s\n", err)
+			os.Exit(ExitFailure)
+		}
+		copy(((*[PageHeaderSize]byte)(unsafe.Pointer(header)))[:], b)
+		copy(pageSlice[:], b)
+	}
+	if pageNum >= p.numPages {
+		p.numPages = pageNum + 1
+	}
+	return header, &pageSlice
 }
 
 func (t *Table) dbClose() {

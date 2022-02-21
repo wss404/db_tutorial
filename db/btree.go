@@ -232,7 +232,7 @@ func (p *Pager) printTree(pagNum, indentationLevel uint32_t) {
 	return
 }
 
-//func (c *Cursor) internalNodeFind(pageNum, key uint32_t)  {
-//	node := c.table.pager.getPage(pageNum)
-//	numKeys :=
-//}
+func (c *Cursor) internalNodeFind(pageNum, key uint32_t)  {
+	node := c.table.pager.getPage(pageNum)
+	numKeys :=
+}
