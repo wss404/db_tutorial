@@ -323,10 +323,17 @@ func (t *Table) tableStart() *Cursor {
 
 func (c *Cursor) advance() {
 	pageNum := c.pageNum
-	header, _ := c.table.pager.getPage(pageNum)
+	header, body := c.table.pager.getPage(pageNum)
+	leafPage := LeafPage{header: header, body: (*LeafPageBody)(body)}
 	c.cellNum += 1
 	if c.cellNum >= header.numCells {
-		c.endOfTable = true
+		nextPageNum := *leafPage.leafNodeNextLeaf()
+		if nextPageNum == 0 {
+			c.endOfTable = true
+		} else {
+			c.pageNum = nextPageNum
+			c.cellNum = 0
+		}
 	}
 }
 
