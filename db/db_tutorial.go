@@ -95,7 +95,7 @@ type PageHeader struct {
 
 const (
 	PageHeaderSize = uint32_t(unsafe.Sizeof(PageHeader{}))
-	PageBodySize = PageSize-PageHeaderSize
+	PageBodySize   = PageSize - PageHeaderSize
 )
 
 //type Page struct { // to create a pagesize memory without malloc()
@@ -114,12 +114,13 @@ type InternalPage struct {
 }
 
 type LeafPageBody struct {
-	cells [LeafNodeMaxCells]LeafPageCell
+	nextLeaf uint32_t
+	cells    [LeafNodeMaxCells]LeafPageCell
 }
 
 type InternalPageBody struct {
 	rightChild uint32_t
-	cells [InternalNodeMaxCells]InternalPageCell
+	cells      [InternalNodeMaxCells]InternalPageCell
 }
 
 type Row struct {
@@ -135,7 +136,7 @@ type LeafPageCell struct {
 
 type InternalPageCell struct {
 	value uint32_t
-	key uint32_t
+	key   uint32_t
 }
 
 type Cursor struct {
@@ -147,7 +148,7 @@ type Cursor struct {
 
 func dbOpen(fileName *string) *Table {
 	pager := pagerOpen(fileName)
-	
+
 	table := new(Table)
 	table.pager = pager
 	table.rootPageNum = 0
@@ -160,7 +161,7 @@ func dbOpen(fileName *string) *Table {
 	return table
 }
 
-func printConstants()  {
+func printConstants() {
 	fmt.Printf("ROW_SIZE: %d\n", RowSize)
 	fmt.Printf("COMMON_NODE_HEADER_SIZE: %d\n", CommonNodeHeaderSize)
 	fmt.Printf("LEAF_NODE_HEADER_SIZE: %d\n", LeafNodeHeaderSize)
@@ -169,7 +170,7 @@ func printConstants()  {
 	fmt.Printf("LEAF_NODE_MAX_CELLS: %d\n", LeafNodeMaxCells)
 }
 
-func (c *LeafPageCell) moveTo(dest *LeafPageCell)  {
+func (c *LeafPageCell) moveTo(dest *LeafPageCell) {
 	copy(((*[LeafNodeCellSize]byte)(unsafe.Pointer(dest)))[:],
 		((*[LeafNodeCellSize]byte)(unsafe.Pointer(c)))[:])
 }
@@ -234,7 +235,7 @@ func (p *Pager) getPage(pageNum uint32_t) (*PageHeader, unsafe.Pointer) {
 	return p.headers[pageNum], p.bodies[pageNum]
 }
 
-func (p *Pager) _getPage(pageNum uint32_t) (*PageHeader, *[PageBodySize]byte){
+func (p *Pager) _getPage(pageNum uint32_t) (*PageHeader, *[PageBodySize]byte) {
 	numPages := p.fileLength / PageSize
 	header := new(PageHeader)
 	var b [PageSize]byte
@@ -311,19 +312,17 @@ func (p *Pager) flush(pageNum uint32_t) {
 }
 
 func (t *Table) tableStart() *Cursor {
-	cursor := new(Cursor)
-	cursor.table = t
-	cursor.pageNum = t.rootPageNum
-	cursor.cellNum = uint32_t(0)
-
-	rootHeader, _ := t.pager.getPage(t.rootPageNum)
-	cursor.endOfTable = rootHeader.numCells == 0
+	cursor := t.find(0)
+	header, body := t.pager.getPage(cursor.pageNum)
+	leafPage := LeafPage{header: header, body: (*LeafPageBody)(body)}
+	numCells := *leafPage.leafNodeNumCells()
+	cursor.endOfTable = numCells == 0
 
 	return cursor
 }
 
 func (c *Cursor) advance() {
-	pageNum :=c.pageNum
+	pageNum := c.pageNum
 	header, _ := c.table.pager.getPage(pageNum)
 	c.cellNum += 1
 	if c.cellNum >= header.numCells {
@@ -451,7 +450,7 @@ func (s *Statement) executeInsert(table *Table) ExecuteResult {
 	return ExecuteSuccess
 }
 
-func (c *Cursor) leafNodeInsert(key uint32_t, value *Row)  {
+func (c *Cursor) leafNodeInsert(key uint32_t, value *Row) {
 	header, body := c.table.pager.getPage(c.pageNum)
 	leafPage := LeafPage{header: header, body: (*LeafPageBody)(body)}
 	numCells := *leafPage.leafNodeNumCells()
@@ -464,7 +463,7 @@ func (c *Cursor) leafNodeInsert(key uint32_t, value *Row)  {
 
 	if c.cellNum < numCells {
 		for i := numCells; i > c.cellNum; i-- {
-			leafPage.leafNodeCell(i-1).moveTo(leafPage.leafNodeCell(i))
+			leafPage.leafNodeCell(i - 1).moveTo(leafPage.leafNodeCell(i))
 		}
 	}
 	*(leafPage.leafNodeNumCells()) += 1
@@ -490,7 +489,7 @@ func (p *LeafPage) getPageType() PageType {
 	return p.header.pageType
 }
 
-func (p *LeafPage) setPageType(t PageType)  {
+func (p *LeafPage) setPageType(t PageType) {
 	p.header.pageType = t
 }
 
@@ -498,7 +497,7 @@ func (p *InternalPage) getPageType() PageType {
 	return p.header.pageType
 }
 
-func (p *InternalPage) setPageType(t PageType)  {
+func (p *InternalPage) setPageType(t PageType) {
 	p.header.pageType = t
 }
 

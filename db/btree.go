@@ -35,13 +35,15 @@ const (
 
 /* Leaf Node Body Layout */
 const (
-	LeafNodeKeySize                = uint32_t(unsafe.Sizeof(uint32_t(0)))
-	LeafNodeKeyOffset     uint32_t = 0
-	LeafNodeValueSize              = RowSize
-	LeafNodeValueOffset            = LeafNodeKeyOffset + LeafNodeKeySize
-	LeafNodeCellSize               = LeafNodeKeySize + LeafNodeValueSize
-	LeafNodeSpaceForCells          = PageSize - LeafNodeHeaderSize
-	LeafNodeMaxCells               = LeafNodeSpaceForCells / LeafNodeCellSize
+	LeafNodeNextLeafSize   = uint32_t(unsafe.Sizeof(uint32_t(0)))
+	LeafNodeNextLeafOffset = uint32_t(0)
+	LeafNodeKeySize        = uint32_t(unsafe.Sizeof(uint32_t(0)))
+	LeafNodeKeyOffset      = LeafNodeNextLeafOffset + LeafNodeNextLeafOffset
+	LeafNodeValueSize      = RowSize
+	LeafNodeValueOffset    = LeafNodeKeyOffset + LeafNodeKeySize
+	LeafNodeCellSize       = LeafNodeKeySize + LeafNodeValueSize
+	LeafNodeSpaceForCells  = PageSize - LeafNodeHeaderSize - LeafNodeNextLeafSize
+	LeafNodeMaxCells       = LeafNodeSpaceForCells / LeafNodeCellSize
 )
 
 /* Internal Node Header Layout */
@@ -55,11 +57,11 @@ const (
 
 /* Internal Node Body Layout */
 const (
-	InternalNodeKeySize       = unsafe.Sizeof(uint32_t(0))
-	InternalNodeChildSize     = unsafe.Sizeof(uint32_t(0))
+	InternalNodeKeySize       = uint32_t(unsafe.Sizeof(uint32_t(0)))
+	InternalNodeChildSize     = uint32_t(unsafe.Sizeof(uint32_t(0)))
 	InternalNodeCellSize      = InternalNodeKeySize + InternalNodeChildSize
 	InternalNodeSpaceForCells = PageSize - InternalNodeHeaderSize
-	InternalNodeMaxCells      = InternalNodeSpaceForCells / InternalNodeSpaceForCells
+	InternalNodeMaxCells      = InternalNodeSpaceForCells / InternalNodeCellSize
 )
 
 const (
@@ -90,6 +92,7 @@ func (p *LeafPage) initializeLeafNode() {
 	p.setPageType(PageLeaf) // actually, it's not necessary since default PageType is PageLeaf
 	p.setNodeRoot(false)
 	*p.leafNodeNumCells() = 0
+	*p.leafNodeNextLeaf() = 0
 }
 
 func (p *LeafPage) printLeafNode() {
@@ -108,6 +111,8 @@ func (c *Cursor) leafNodeSplitAndInsert(key uint32_t, value *Row) {
 	newHeader, newBody := c.table.pager.getPage(newPageNum)
 	newPage := &LeafPage{header: newHeader, body: (*LeafPageBody)(newBody)}
 	newPage.initializeLeafNode()
+	*newPage.leafNodeNextLeaf() = *oldPage.leafNodeNextLeaf()
+	*oldPage.leafNodeNextLeaf() = newPageNum
 
 	// TODO:有待改进
 	for i := int32(LeafNodeMaxCells); i >= 0; i-- {
@@ -120,7 +125,9 @@ func (c *Cursor) leafNodeSplitAndInsert(key uint32_t, value *Row) {
 		destinationCell := destinationPage.leafNodeCell(indexWithinCell)
 
 		if i == int32(c.cellNum) {
-			value.serializeRow(unsafe.Pointer(destinationCell))
+			//value.serializeRow(unsafe.Pointer(destinationCell))
+			value.serializeRow(unsafe.Pointer(destinationPage.leafNodeValue(indexWithinCell)))
+			*destinationPage.leafNodeKey(indexWithinCell) = key
 		} else if i > int32(c.cellNum) {
 			oldPage.leafNodeCell(uint32_t(i - 1)).moveTo(destinationCell)
 		} else {
@@ -228,7 +235,7 @@ func (p *LeafPage) getMaxKey() uint32_t {
 	return *(p.leafNodeKey(*(p.leafNodeNumCells()) - 1))
 }
 
-func indent(level uint32_t)  {
+func indent(level uint32_t) {
 	for i := 0; i < int(level); i++ {
 		fmt.Printf(" ")
 	}
@@ -243,8 +250,8 @@ func (p *Pager) printTree(pageNum, indentationLevel uint32_t) {
 		numKeys := *leafPage.leafNodeNumCells()
 		indent(indentationLevel)
 		fmt.Printf("- leaf (size %d)\n", numKeys)
-		for i:=uint32_t(0); i<numKeys;i++ {
-			indent(indentationLevel+1)
+		for i := uint32_t(0); i < numKeys; i++ {
+			indent(indentationLevel + 1)
 			fmt.Printf("- %d\n", *leafPage.leafNodeKey(i))
 		}
 	case PageInternal:
@@ -252,7 +259,7 @@ func (p *Pager) printTree(pageNum, indentationLevel uint32_t) {
 		numKeys := *internalPage.internalNodeNumKeys()
 		indent(indentationLevel)
 		fmt.Printf("- internal (size %d)\n", numKeys)
-		for i:=uint32_t(0); i<numKeys;i++ {
+		for i := uint32_t(0); i < numKeys; i++ {
 			child := *internalPage.internalNodeChild(i)
 			p.printTree(child, indentationLevel+1)
 			fmt.Printf("- key %d\n", *internalPage.internalNodeKey(i))
@@ -286,4 +293,8 @@ func (t *Table) internalNodeFind(pageNum, key uint32_t) *Cursor {
 	default:
 		return t.internalNodeFind(childNum, key)
 	}
+}
+
+func (p *LeafPage) leafNodeNextLeaf() *uint32_t {
+	return &(p.body.nextLeaf)
 }
