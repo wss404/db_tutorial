@@ -119,7 +119,7 @@ type LeafPageBody struct {
 
 type InternalPageBody struct {
 	rightChild uint32_t
-	cells [InternalNodeMaxCells]*InternalPageCell
+	cells [InternalNodeMaxCells]InternalPageCell
 }
 
 type Row struct {

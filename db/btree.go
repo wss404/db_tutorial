@@ -154,7 +154,7 @@ func (t *Table) createNewRoot(rightChildPageNum uint32_t) {
 	copy((*[PageBodySize]byte)(leftChildBody)[:], (*[PageBodySize]byte)(rootBody)[:])
 	leftChild.setNodeRoot(false)
 
-	internalNode := new(InternalPage)
+	internalNode := InternalPage{header: new(PageHeader), body: new(InternalPageBody)}
 	internalNode.initializeInternalNode()
 	internalNode.setNodeRoot(true)
 	*(internalNode.internalNodeNumKeys()) = 1
