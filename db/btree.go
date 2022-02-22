@@ -67,32 +67,32 @@ const (
 	LeafNodeLeftSpiltCount  = LeafNodeMaxCells + 1 - LeafNodeRightSplitCount
 )
 
-func (p *Page) leafNodeNumCells() *uint32_t {
-	if p.pageType == PageLeaf {
-		return &(p.numCells)
+func (p *LeafPage) leafNodeNumCells() *uint32_t {
+	if p.header.pageType == PageLeaf {
+		return &(p.header.numCells)
 	}
 	panic("trying to get numCells from internal node")
 }
 
-func (p *Page) leafNodeCell(cellNum uint32_t) *Cell {
-	return &(p.cells[cellNum])
+func (p *LeafPage) leafNodeCell(cellNum uint32_t) *LeafPageCell {
+	return &(p.body.cells[cellNum])
 }
 
-func (p *Page) leafNodeKey(cellNum uint32_t) *uint32_t {
+func (p *LeafPage) leafNodeKey(cellNum uint32_t) *uint32_t {
 	return &(p.leafNodeCell(cellNum).key)
 }
 
-func (p *Page) leafNodeValue(cellNum uint32_t) *Row {
-	return &(p.leafNodeCell(cellNum).value)
+func (p *LeafPage) leafNodeValue(cellNum uint32_t) *Row {
+	return &(p.body.cells[cellNum].value)
 }
 
-func (p *Page) initializeLeafNode() {
+func (p *LeafPage) initializeLeafNode() {
 	p.setPageType(PageLeaf) // actually, it's not necessary since default PageType is PageLeaf
 	p.setNodeRoot(false)
 	*p.leafNodeNumCells() = 0
 }
 
-func (p *Page) printLeafNode() {
+func (p *LeafPage) printLeafNode() {
 	numCells := *p.leafNodeNumCells()
 	fmt.Printf("leaf (size %d)\n", numCells)
 	for i := uint32_t(0); i < numCells; i++ {
@@ -102,14 +102,16 @@ func (p *Page) printLeafNode() {
 }
 
 func (c *Cursor) leafNodeSplitAndInsert(key uint32_t, value *Row) {
-	oldPage := c.table.pager.getPage(c.pageNum)
+	oldHeader, oldBody := c.table.pager.getPage(c.pageNum)
+	oldPage := &LeafPage{header: oldHeader, body: (*LeafPageBody)(oldBody)}
 	newPageNum := c.table.pager.getUnusedPageNum()
-	newPage := c.table.pager.getPage(newPageNum)
+	newHeader, newBody := c.table.pager.getPage(newPageNum)
+	newPage := &LeafPage{header: newHeader, body: (*LeafPageBody)(newBody)}
 	newPage.initializeLeafNode()
 
 	// TODO:有待改进
 	for i := int32(LeafNodeMaxCells); i >= 0; i-- {
-		var destinationPage *Page
+		var destinationPage *LeafPage
 		destinationPage = oldPage
 		if i >= int32(LeafNodeLeftSpiltCount) {
 			destinationPage = newPage
@@ -129,7 +131,7 @@ func (c *Cursor) leafNodeSplitAndInsert(key uint32_t, value *Row) {
 	*(oldPage.leafNodeNumCells()) = LeafNodeLeftSpiltCount
 	*(newPage.leafNodeNumCells()) = LeafNodeRightSplitCount
 
-	if oldPage.isRoot != 0 {
+	if oldPage.header.isRoot != 0 {
 		c.table.createNewRoot(newPageNum)
 	} else {
 		fmt.Println("Need to implement updating parent after split.")
@@ -140,12 +142,16 @@ func (c *Cursor) leafNodeSplitAndInsert(key uint32_t, value *Row) {
 func (p *Pager) getUnusedPageNum() uint32_t { return p.numPages }
 
 func (t *Table) createNewRoot(rightChildPageNum uint32_t) {
-	root := t.pager.getPage(t.rootPageNum)
+	rootHeader, rootBody := t.pager.getPage(t.rootPageNum)
+	//root := LeafPage{header: rootHeader, body: (*LeafPageBody)(rootBody)}
 	//rightChild := t.pager.getPage(rightChildPageNum)
 	leftChildPageNum := t.pager.getUnusedPageNum()
-	leftChild := t.pager.getPage(leftChildPageNum)
+	leftChildHeader, leftChildBody := t.pager.getPage(leftChildPageNum)
+	leftChild := LeafPage{header: leftChildHeader, body: (*LeafPageBody)(leftChildBody)}
 
-	copy((*[PageSize]byte)(unsafe.Pointer(leftChild))[:], (*[PageSize]byte)(unsafe.Pointer(root))[:])
+	copy((*[PageHeaderSize]byte)(unsafe.Pointer(leftChildHeader))[:],
+		(*[PageHeaderSize]byte)(unsafe.Pointer(rootHeader))[:])
+	copy((*[PageBodySize]byte)(leftChildBody)[:], (*[PageBodySize]byte)(rootBody)[:])
 	leftChild.setNodeRoot(false)
 
 	internalNode := new(InternalPage)
@@ -159,52 +165,52 @@ func (t *Table) createNewRoot(rightChildPageNum uint32_t) {
 }
 
 func (p *InternalPage) internalNodeNumKeys() *uint32_t {
-	if p.pageType == PageInternal {
-		return &(p.numCells)
+	if p.header.pageType == PageInternal {
+		return &(p.header.numCells)
 	}
 	panic("trying to get numCells from internal node")
 }
 
 func (p *InternalPage) internalNodeRightChild() *uint32_t {
-	return &p.rightChild
+	return &p.body.rightChild
 }
 
-func (p *InternalPage) internalNodeCell(cellNum uint32_t) *InternalNodeCell {
-	return &(p.cells[cellNum])
+func (p *InternalPage) internalNodeCell(cellNum uint32_t) *uint32_t {
+	return &(p.body.cells[cellNum].value)
 }
 
 func (p *InternalPage) internalNodeChild(childNum uint32_t) *uint32_t {
-	numKeys := p.numCells
+	numKeys := p.header.numCells
 	if childNum > numKeys {
 		fmt.Printf("Tried to access child_num %d > num_keys %d\n", childNum, numKeys)
 		os.Exit(ExitFailure)
 	} else if childNum == numKeys {
 		return p.internalNodeRightChild()
 	}
-	return &p.internalNodeCell(childNum).value
+	return p.internalNodeCell(childNum)
 }
 
 func (p *InternalPage) internalNodeKey(keyNum uint32_t) *uint32_t {
-	return &(p.cells[keyNum].key)
+	return &(p.body.cells[keyNum].key)
 }
 
 func (p *InternalPage) isNodeRoot() bool {
-	return p.isRoot == 1
+	return p.header.isRoot == 1
 }
 
-func (p *InternalPage) setNodeRoot(isRoot bool) { //考虑用interface实现公用功能
+func (p *LeafPage) setNodeRoot(isRoot bool) {
 	if isRoot {
-		p.isRoot = 1
+		p.header.isRoot = 1
 	} else {
-		p.isRoot = 0
+		p.header.isRoot = 0
 	}
 }
 
-func (p *Page) setNodeRoot(isRoot bool) {
+func (p *InternalPage) setNodeRoot(isRoot bool) {
 	if isRoot {
-		p.isRoot = 1
+		p.header.isRoot = 1
 	} else {
-		p.isRoot = 0
+		p.header.isRoot = 0
 	}
 }
 
@@ -218,7 +224,7 @@ func (p *InternalPage) getMaxKey() uint32_t {
 	return *(p.internalNodeKey(*(p.internalNodeNumKeys()) - 1))
 }
 
-func (p *Page) getMaxKey() uint32_t {
+func (p *LeafPage) getMaxKey() uint32_t {
 	return *(p.leafNodeKey(*(p.leafNodeNumCells()) - 1))
 }
 
@@ -228,11 +234,56 @@ func indent(level uint32_t)  {
 	}
 }
 
-func (p *Pager) printTree(pagNum, indentationLevel uint32_t) {
-	return
+func (p *Pager) printTree(pageNum, indentationLevel uint32_t) {
+	header, body := p.getPage(pageNum)
+
+	switch header.pageType {
+	case PageLeaf:
+		leafPage := LeafPage{header: header, body: (*LeafPageBody)(body)}
+		numKeys := *leafPage.leafNodeNumCells()
+		indent(indentationLevel)
+		fmt.Printf("- leaf (size %d)\n", numKeys)
+		for i:=uint32_t(0); i<numKeys;i++ {
+			indent(indentationLevel+1)
+			fmt.Printf("- %d\n", *leafPage.leafNodeKey(i))
+		}
+	case PageInternal:
+		internalPage := InternalPage{header: header, body: (*InternalPageBody)(body)}
+		numKeys := *internalPage.internalNodeNumKeys()
+		indent(indentationLevel)
+		fmt.Printf("- internal (size %d)\n", numKeys)
+		for i:=uint32_t(0); i<numKeys;i++ {
+			child := *internalPage.internalNodeChild(i)
+			p.printTree(child, indentationLevel+1)
+			fmt.Printf("- key %d\n", *internalPage.internalNodeKey(i))
+		}
+		child := *internalPage.internalNodeRightChild()
+		p.printTree(child, indentationLevel+1)
+	}
 }
 
-func (c *Cursor) internalNodeFind(pageNum, key uint32_t)  {
-	node := c.table.pager.getPage(pageNum)
-	numKeys :=
+func (t *Table) internalNodeFind(pageNum, key uint32_t) *Cursor {
+	header, body := t.pager.getPage(pageNum)
+	internalPage := InternalPage{header: header, body: (*InternalPageBody)(body)}
+	numKeys := *internalPage.internalNodeNumKeys()
+
+	minIndex, maxIndex := uint32_t(0), numKeys
+	for minIndex != maxIndex {
+		index := (minIndex + maxIndex) / 2
+		keyToRight := *internalPage.internalNodeKey(index)
+		if keyToRight >= key {
+			maxIndex = index
+		} else {
+			minIndex = index + 1
+		}
+	}
+
+	childNum := *internalPage.internalNodeCell(minIndex)
+	childHeader, _ := t.pager.getPage(childNum)
+	switch childHeader.pageType {
+	case PageLeaf:
+		return t.leafNodeFind(childNum, key)
+	default:
+		return t.internalNodeFind(childNum, key)
+	}
 }
