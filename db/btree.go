@@ -281,6 +281,8 @@ func (p *Pager) printTree(pageNum, indentationLevel uint32_t) {
 		for i := uint32_t(0); i < numKeys; i++ {
 			child := *internalPage.internalNodeChild(i)
 			p.printTree(child, indentationLevel+1)
+
+			indent(indentationLevel + 1)
 			fmt.Printf("- key %d\n", *internalPage.internalNodeKey(i))
 		}
 		child := *internalPage.internalNodeRightChild()
@@ -368,23 +370,3 @@ func (t *Table) internalNodeInsert(parentPageNum, childPageNum uint32_t) {
 		*parentPage.internalNodeKey(index) = childMaxKey
 	}
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

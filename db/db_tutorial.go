@@ -383,6 +383,12 @@ func doMetaCommand(inputBuffer *InputBuffer, table *Table) MetaCommandResult {
 		//leafPage.printLeafNode()
 		table.pager.printTree(0, 0)
 		return MetaCommandSuccess
+	} else if strings.TrimSpace(string(inputBuffer.buffer)) == ".pages" {
+		for i := uint32_t(0); i < table.pager.numPages; i++ {
+			header, _ := table.pager.getPage(i)
+			fmt.Println(header.pageType)
+		}
+		return MetaCommandSuccess
 	}
 	return MetaCommandUnrecognizedCommand
 }
@@ -492,8 +498,8 @@ func (t *Table) find(key uint32_t) *Cursor {
 	} else {
 		//fmt.Println("Need to implement searching an internal node.")
 		//os.Exit(ExitFailure)
-		//return t.internalNodeFind(rootPageNum, key)
-		panic("Need to implement searching an internal node.")
+		return t.internalNodeFind(rootPageNum, key)
+		//panic("Need to implement searching an internal node.")
 	}
 }
 
