@@ -175,6 +175,11 @@ func (c *LeafPageCell) moveTo(dest *LeafPageCell) {
 		((*[LeafNodeCellSize]byte)(unsafe.Pointer(c)))[:])
 }
 
+func (c *InternalPageCell) moveTo(dest *InternalPageCell) {
+	copy(((*[InternalNodeCellSize]byte)(unsafe.Pointer(dest)))[:],
+		((*[InternalNodeCellSize]byte)(unsafe.Pointer(c)))[:])
+}
+
 func pagerOpen(fileName *string) *Pager {
 	fd, err := os.OpenFile(*fileName, os.O_RDWR|os.O_CREATE, 0755) //fd实际为file指针，文件描述符用*File.fd()获取
 	if err != nil {

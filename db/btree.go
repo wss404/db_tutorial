@@ -61,7 +61,7 @@ const (
 	InternalNodeChildSize     = uint32_t(unsafe.Sizeof(uint32_t(0)))
 	InternalNodeCellSize      = InternalNodeKeySize + InternalNodeChildSize
 	InternalNodeSpaceForCells = PageSize - InternalNodeHeaderSize
-	InternalNodeMaxCells      = InternalNodeSpaceForCells / InternalNodeCellSize
+	InternalNodeMaxCells      = 3
 )
 
 const (
@@ -107,10 +107,12 @@ func (p *LeafPage) printLeafNode() {
 func (c *Cursor) leafNodeSplitAndInsert(key uint32_t, value *Row) {
 	oldHeader, oldBody := c.table.pager.getPage(c.pageNum)
 	oldPage := &LeafPage{header: oldHeader, body: (*LeafPageBody)(oldBody)}
+	oldMax := oldPage.getMaxKey()
 	newPageNum := c.table.pager.getUnusedPageNum()
 	newHeader, newBody := c.table.pager.getPage(newPageNum)
 	newPage := &LeafPage{header: newHeader, body: (*LeafPageBody)(newBody)}
 	newPage.initializeLeafNode()
+	newPage.header.parentPointer = oldPage.header.parentPointer
 	*newPage.leafNodeNextLeaf() = *oldPage.leafNodeNextLeaf()
 	*oldPage.leafNodeNextLeaf() = newPageNum
 
@@ -141,8 +143,17 @@ func (c *Cursor) leafNodeSplitAndInsert(key uint32_t, value *Row) {
 	if oldPage.header.isRoot != 0 {
 		c.table.createNewRoot(newPageNum)
 	} else {
-		fmt.Println("Need to implement updating parent after split.")
-		os.Exit(ExitFailure)
+		//fmt.Println("Need to implement updating parent after split.")
+		//os.Exit(ExitFailure)
+		parentPageNum := oldPage.header.parentPointer
+		newMax := oldPage.getMaxKey()
+		parentHeader, parentBody := c.table.pager.getPage(parentPageNum)
+		parentPage := InternalPage{
+			header: parentHeader,
+			body: (*InternalPageBody)(parentBody),
+		}
+		parentPage.updateInternalNodeKey(oldMax, newMax)
+		c.table.internalNodeInsert(parentPageNum, newPageNum)
 	}
 }
 
@@ -169,6 +180,14 @@ func (t *Table) createNewRoot(rightChildPageNum uint32_t) {
 	leftChildMaxKey := leftChild.getMaxKey()
 	*(internalNode.internalNodeKey(0)) = leftChildMaxKey
 	*(internalNode.internalNodeRightChild()) = rightChildPageNum
+	rightChildHeader, _ := t.pager.getPage(rightChildPageNum)
+	leftChild.header.parentPointer = t.rootPageNum
+	rightChildHeader.parentPointer = t.rootPageNum
+}
+
+func (p *InternalPage) updateInternalNodeKey(oldKey, newKey uint32_t) {
+	oldChildMax := p.internalNodeFindChild(oldKey)
+	*p.internalNodeKey(oldChildMax) = newKey
 }
 
 func (p *InternalPage) internalNodeNumKeys() *uint32_t {
@@ -182,8 +201,8 @@ func (p *InternalPage) internalNodeRightChild() *uint32_t {
 	return &p.body.rightChild
 }
 
-func (p *InternalPage) internalNodeCell(cellNum uint32_t) *uint32_t {
-	return &(p.body.cells[cellNum].value)
+func (p *InternalPage) internalNodeCell(cellNum uint32_t) *InternalPageCell {
+	return &(p.body.cells[cellNum])
 }
 
 func (p *InternalPage) internalNodeChild(childNum uint32_t) *uint32_t {
@@ -194,7 +213,7 @@ func (p *InternalPage) internalNodeChild(childNum uint32_t) *uint32_t {
 	} else if childNum == numKeys {
 		return p.internalNodeRightChild()
 	}
-	return p.internalNodeCell(childNum)
+	return &(p.internalNodeCell(childNum).value)
 }
 
 func (p *InternalPage) internalNodeKey(keyNum uint32_t) *uint32_t {
@@ -269,23 +288,27 @@ func (p *Pager) printTree(pageNum, indentationLevel uint32_t) {
 	}
 }
 
-func (t *Table) internalNodeFind(pageNum, key uint32_t) *Cursor {
-	header, body := t.pager.getPage(pageNum)
-	internalPage := InternalPage{header: header, body: (*InternalPageBody)(body)}
-	numKeys := *internalPage.internalNodeNumKeys()
+func (p *InternalPage) internalNodeFindChild(key uint32_t) uint32_t {
+	numKeys := *p.internalNodeNumKeys()
 
 	minIndex, maxIndex := uint32_t(0), numKeys
 	for minIndex != maxIndex {
 		index := (minIndex + maxIndex) / 2
-		keyToRight := *internalPage.internalNodeKey(index)
+		keyToRight := *p.internalNodeKey(index)
 		if keyToRight >= key {
 			maxIndex = index
 		} else {
 			minIndex = index + 1
 		}
 	}
+	return minIndex
+}
 
-	childNum := *internalPage.internalNodeCell(minIndex)
+func (t *Table) internalNodeFind(pageNum, key uint32_t) *Cursor {
+	header, body := t.pager.getPage(pageNum)
+	internalPage := &InternalPage{header: header, body: (*InternalPageBody)(body)}
+	childIndex := internalPage.internalNodeFindChild(key)
+	childNum := *internalPage.internalNodeChild(childIndex)
 	childHeader, _ := t.pager.getPage(childNum)
 	switch childHeader.pageType {
 	case PageLeaf:
@@ -298,3 +321,70 @@ func (t *Table) internalNodeFind(pageNum, key uint32_t) *Cursor {
 func (p *LeafPage) leafNodeNextLeaf() *uint32_t {
 	return &(p.body.nextLeaf)
 }
+
+func (t *Table) internalNodeInsert(parentPageNum, childPageNum uint32_t) {
+	parentHeader, parentBody := t.pager.getPage(parentPageNum)
+	parentPage := InternalPage{header: parentHeader, body: (*InternalPageBody)(parentBody)}
+	childHeader, childBody := t.pager.getPage(childPageNum)
+	var childMaxKey uint32_t
+	if childHeader.pageType == PageLeaf {
+		childPage := LeafPage{header: childHeader, body: (*LeafPageBody)(childBody)}
+		childMaxKey = childPage.getMaxKey()
+	} else {
+		childPage := InternalPage{header: childHeader, body: (*InternalPageBody)(childBody)}
+		childMaxKey = childPage.getMaxKey()
+	}
+	index := parentPage.internalNodeFindChild(childMaxKey)
+
+	originalNumKeys := *parentPage.internalNodeNumKeys()
+	*parentPage.internalNodeNumKeys() = originalNumKeys + 1
+
+	if originalNumKeys >= InternalNodeMaxCells {
+		fmt.Println("Need to implement splitting internal node")
+		os.Exit(ExitFailure)
+	}
+
+	rightChildPageNum := *parentPage.internalNodeRightChild()
+	rightChildHeader, _ := t.pager.getPage(rightChildPageNum)
+
+	var rightChildMaxKey uint32_t
+	if rightChildHeader.pageType == PageLeaf {
+		rightChildPage := LeafPage{header: childHeader, body: (*LeafPageBody)(childBody)}
+		rightChildMaxKey = rightChildPage.getMaxKey()
+	} else {
+		rightChildPage := InternalPage{header: childHeader, body: (*InternalPageBody)(childBody)}
+		rightChildMaxKey = rightChildPage.getMaxKey()
+	}
+	if childMaxKey > rightChildMaxKey {
+		*parentPage.internalNodeChild(originalNumKeys) = rightChildPageNum
+		*parentPage.internalNodeKey(originalNumKeys) = rightChildMaxKey
+	} else {
+		for i := originalNumKeys; i > index; i-- {
+			destination := parentPage.internalNodeCell(i)
+			source := parentPage.internalNodeCell(i-1)
+			source.moveTo(destination)
+		}
+		*parentPage.internalNodeChild(index) = childPageNum
+		*parentPage.internalNodeKey(index) = childMaxKey
+	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

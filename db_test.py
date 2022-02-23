@@ -35,9 +35,9 @@ class LimitTest(object):
         self.select = "select"
         self.tester = MainTest(arg)
 
-    def function_test(self):
+    def function_test(self, i):
         output = ''
-        cmds = [self.sampleCapacity.format(id=0), self.select]
+        cmds = [self.sampleCapacity.format(id=i), self.select]
         for c in cmds:
             self.tester.send(c)
             output += self.tester.recv()
@@ -78,4 +78,6 @@ class LimitTest(object):
 if __name__ == '__main__':
     testArgs = ('./main',)
     tester = LimitTest(testArgs)
-    tester.test_table_capacity()
+    for i in range(20):
+        tester.function_test(i)
+    tester.tester.send(tester.exit)
