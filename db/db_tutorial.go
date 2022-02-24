@@ -70,7 +70,7 @@ const (
 	RowSize        = IdSize + UsernameSize + EmailSize
 
 	TableMaxPages uint32_t = 100
-	PageSize      uint32_t = 4096
+	PageSize      uint32_t = 1024
 )
 
 type Table struct {
@@ -386,7 +386,7 @@ func doMetaCommand(inputBuffer *InputBuffer, table *Table) MetaCommandResult {
 	} else if strings.TrimSpace(string(inputBuffer.buffer)) == ".pages" {
 		for i := uint32_t(0); i < table.pager.numPages; i++ {
 			header, _ := table.pager.getPage(i)
-			fmt.Println(header.pageType)
+			fmt.Println(header.pageType, header.isRoot)
 		}
 		return MetaCommandSuccess
 	}

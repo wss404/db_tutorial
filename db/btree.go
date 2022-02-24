@@ -117,20 +117,20 @@ func (c *Cursor) leafNodeSplitAndInsert(key uint32_t, value *Row) {
 	*oldPage.leafNodeNextLeaf() = newPageNum
 
 	// TODO:有待改进
-	for i := int32(LeafNodeMaxCells); i >= 0; i-- {
+	for i := int64(LeafNodeMaxCells); i >= 0; i-- {
 		var destinationPage *LeafPage
 		destinationPage = oldPage
-		if i >= int32(LeafNodeLeftSpiltCount) {
+		if i >= int64(LeafNodeLeftSpiltCount) {
 			destinationPage = newPage
 		}
-		indexWithinCell := uint32_t(i % int32(LeafNodeLeftSpiltCount))
+		indexWithinCell := uint32_t(i % int64(LeafNodeLeftSpiltCount))
 		destinationCell := destinationPage.leafNodeCell(indexWithinCell)
 
-		if i == int32(c.cellNum) {
+		if i == int64(c.cellNum) {
 			//value.serializeRow(unsafe.Pointer(destinationCell))
 			value.serializeRow(unsafe.Pointer(destinationPage.leafNodeValue(indexWithinCell)))
 			*destinationPage.leafNodeKey(indexWithinCell) = key
-		} else if i > int32(c.cellNum) {
+		} else if i > int64(c.cellNum) {
 			oldPage.leafNodeCell(uint32_t(i - 1)).moveTo(destinationCell)
 		} else {
 			oldPage.leafNodeCell(uint32_t(i)).moveTo(destinationCell)
@@ -172,22 +172,27 @@ func (t *Table) createNewRoot(rightChildPageNum uint32_t) {
 	copy((*[PageBodySize]byte)(leftChildBody)[:], (*[PageBodySize]byte)(rootBody)[:])
 	leftChild.setNodeRoot(false)
 
-	internalNode := InternalPage{header: new(PageHeader), body: new(InternalPageBody)}
-	internalNode.initializeInternalNode()
-	internalNode.setNodeRoot(true)
-	*(internalNode.internalNodeNumKeys()) = 1
-	*(internalNode.internalNodeChild(0)) = leftChildPageNum
+	//internalNode := InternalPage{header: new(PageHeader), body: new(InternalPageBody)}
+	newRootHeader := new(PageHeader)
+	newRootBody := new(InternalPageBody)
+	newRoot := InternalPage{header: newRootHeader, body: newRootBody}
+	newRoot.initializeInternalNode()
+	newRoot.setNodeRoot(true)
+	*(newRoot.internalNodeNumKeys()) = 1
+	*(newRoot.internalNodeChild(0)) = leftChildPageNum
 	leftChildMaxKey := leftChild.getMaxKey()
-	*(internalNode.internalNodeKey(0)) = leftChildMaxKey
-	*(internalNode.internalNodeRightChild()) = rightChildPageNum
+	*(newRoot.internalNodeKey(0)) = leftChildMaxKey
+	*(newRoot.internalNodeRightChild()) = rightChildPageNum
 	rightChildHeader, _ := t.pager.getPage(rightChildPageNum)
 	leftChild.header.parentPointer = t.rootPageNum
 	rightChildHeader.parentPointer = t.rootPageNum
+	t.pager.headers[t.rootPageNum] = newRootHeader
+	t.pager.bodies[t.rootPageNum] = unsafe.Pointer(newRootBody)
 }
 
 func (p *InternalPage) updateInternalNodeKey(oldKey, newKey uint32_t) {
-	oldChildMax := p.internalNodeFindChild(oldKey)
-	*p.internalNodeKey(oldChildMax) = newKey
+	oldChildIndex := p.internalNodeFindChild(oldKey)
+	*p.internalNodeKey(oldChildIndex) = newKey
 }
 
 func (p *InternalPage) internalNodeNumKeys() *uint32_t {
