@@ -135,7 +135,7 @@ type LeafPageCell struct {
 }
 
 type InternalPageCell struct {
-	value uint32_t
+	value uint32_t        //pageNum
 	key   uint32_t
 }
 
@@ -389,7 +389,27 @@ func doMetaCommand(inputBuffer *InputBuffer, table *Table) MetaCommandResult {
 			fmt.Println(header.pageType, header.isRoot)
 		}
 		return MetaCommandSuccess
-	}
+	} else if strings.TrimSpace(string(inputBuffer.buffer)) == ".keys" {
+		fmt.Println("keys:")
+	  	for i := uint32_t(0); i < table.pager.numPages; i++ {
+	  		header, body := table.pager.getPage(i)
+	  		if header.pageType == PageLeaf {
+	  			cells := (*LeafPageBody)(body).cells
+	  			fmt.Println("leaf page ", i)
+	  			for _, c := range cells {
+	  				fmt.Println(c.key)
+				}
+			} else if header.pageType == PageInternal {
+				fmt.Println("internal page ", i)
+				cells := (*InternalPageBody)(body).cells
+				for _, c := range cells {
+					fmt.Println(c.key)
+				}
+			}
+	  	}
+	  	return MetaCommandSuccess
+	  }
+
 	return MetaCommandUnrecognizedCommand
 }
 
@@ -449,13 +469,17 @@ func executeStatement(statement *Statement, table *Table) ExecuteResult {
 }
 
 func (s *Statement) executeInsert(table *Table) ExecuteResult {
-	header, body := table.pager.getPage(table.rootPageNum)
-	leafPage := LeafPage{header: header, body: (*LeafPageBody)(body)}
-	numCells := *(leafPage.leafNodeNumCells())
+	//header, body := table.pager.getPage(table.rootPageNum)
+	//leafPage := LeafPage{header: header, body: (*LeafPageBody)(body)}
+	//numCells := *(leafPage.leafNodeNumCells())
 
 	rowToInsert := s.rowToInsert
 	keyToInsert := rowToInsert.id
 	cursor := table.find(keyToInsert)
+
+	header, body := table.pager.getPage(cursor.pageNum)
+	leafPage := LeafPage{header: header, body: (*LeafPageBody)(body)}
+	numCells := *leafPage.leafNodeNumCells()
 
 	if cursor.cellNum < numCells {
 		keyAtIndex := *leafPage.leafNodeKey(cursor.cellNum)
