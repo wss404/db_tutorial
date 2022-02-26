@@ -98,11 +98,6 @@ const (
 	PageBodySize   = PageSize - PageHeaderSize
 )
 
-//type Page struct { // to create a pagesize memory without malloc()
-//	header PageHeader
-//	body   [PageBodySize]byte
-//}
-
 type LeafPage struct {
 	header *PageHeader
 	body   *LeafPageBody
@@ -135,7 +130,7 @@ type LeafPageCell struct {
 }
 
 type InternalPageCell struct {
-	value uint32_t        //pageNum
+	value uint32_t //pageNum
 	key   uint32_t
 }
 
@@ -378,9 +373,6 @@ func doMetaCommand(inputBuffer *InputBuffer, table *Table) MetaCommandResult {
 		return MetaCommandSuccess
 	} else if strings.TrimSpace(string(inputBuffer.buffer)) == ".btree" {
 		fmt.Println("Tree:")
-		//header, body := table.pager.getPage(0)
-		//leafPage := LeafPage{header: header, body: (*LeafPageBody)(body)}
-		//leafPage.printLeafNode()
 		table.pager.printTree(0, 0)
 		return MetaCommandSuccess
 	} else if strings.TrimSpace(string(inputBuffer.buffer)) == ".pages" {
@@ -390,27 +382,57 @@ func doMetaCommand(inputBuffer *InputBuffer, table *Table) MetaCommandResult {
 		}
 		return MetaCommandSuccess
 	} else if strings.TrimSpace(string(inputBuffer.buffer)) == ".keys" {
-		fmt.Println("keys:")
-	  	for i := uint32_t(0); i < table.pager.numPages; i++ {
-	  		header, body := table.pager.getPage(i)
-	  		if header.pageType == PageLeaf {
-	  			cells := (*LeafPageBody)(body).cells
-	  			fmt.Println("leaf page ", i)
-	  			for _, c := range cells {
-	  				fmt.Println(c.key)
-				}
-			} else if header.pageType == PageInternal {
-				fmt.Println("internal page ", i)
-				cells := (*InternalPageBody)(body).cells
-				for _, c := range cells {
-					fmt.Println(c.key)
-				}
-			}
-	  	}
-	  	return MetaCommandSuccess
-	  }
+		printKeys(table)
+		return MetaCommandSuccess
+	} else if strings.TrimSpace(string(inputBuffer.buffer)) == ".kvs" {
+		printKvs(table)
+		return MetaCommandSuccess
+	}
 
 	return MetaCommandUnrecognizedCommand
+}
+
+func printKeys(table *Table) {
+	fmt.Println("keys:")
+	for i := uint32_t(0); i < table.pager.numPages; i++ {
+		header, body := table.pager.getPage(i)
+		if header.pageType == PageLeaf {
+			cells := (*LeafPageBody)(body).cells
+			fmt.Println("leaf page ", i)
+			for _, c := range cells {
+				fmt.Println(c.key)
+			}
+		} else if header.pageType == PageInternal {
+			fmt.Println("internal page ", i)
+			cells := (*InternalPageBody)(body).cells
+			for _, c := range cells {
+				fmt.Println(c.key)
+			}
+		}
+	}
+}
+
+func printKvs(table *Table) {
+	fmt.Println("keys&values:")
+	for i := uint32_t(0); i < table.pager.numPages; i++ {
+		header, body := table.pager.getPage(i)
+		if header.pageType == PageLeaf {
+			cells := (*LeafPageBody)(body).cells
+			fmt.Println("leaf page ", i)
+			fmt.Println("num rows: ", header.numCells)
+			for _, c := range cells {
+				fmt.Println(c.key)
+			}
+		} else if header.pageType == PageInternal {
+			fmt.Println("internal page ", i)
+			fmt.Println("num rows: ", header.numCells)
+			fmt.Println("right child: ", (*InternalPageBody)(body).rightChild)
+			cells := (*InternalPageBody)(body).cells
+			for _, c := range cells {
+				fmt.Println(c.key, c.value)
+			}
+		}
+	}
 }
 
 func prepareStatement(inputBuffer *InputBuffer, statement *Statement) PrepareResult {

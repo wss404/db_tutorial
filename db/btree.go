@@ -89,8 +89,8 @@ func (p *LeafPage) leafNodeValue(cellNum uint32_t) *Row {
 }
 
 func (p *LeafPage) initializeLeafNode() {
-	p.setPageType(PageLeaf) // actually, it's not necessary since default PageType is PageLeaf
-	p.setNodeRoot(false)
+	//p.setPageType(PageLeaf) // actually, it's not necessary since default PageType is PageLeaf
+	//p.setNodeRoot(false)
 	*p.leafNodeNumCells() = 0
 	*p.leafNodeNextLeaf() = 0
 }
@@ -143,8 +143,6 @@ func (c *Cursor) leafNodeSplitAndInsert(key uint32_t, value *Row) {
 	if oldPage.header.isRoot != 0 {
 		c.table.createNewRoot(newPageNum)
 	} else {
-		//fmt.Println("Need to implement updating parent after split.")
-		//os.Exit(ExitFailure)
 		parentPageNum := oldPage.header.parentPointer
 		newMax := oldPage.getMaxKey()
 		parentHeader, parentBody := c.table.pager.getPage(parentPageNum)
@@ -161,8 +159,6 @@ func (p *Pager) getUnusedPageNum() uint32_t { return p.numPages }
 
 func (t *Table) createNewRoot(rightChildPageNum uint32_t) {
 	rootHeader, rootBody := t.pager.getPage(t.rootPageNum)
-	//root := LeafPage{header: rootHeader, body: (*LeafPageBody)(rootBody)}
-	//rightChild := t.pager.getPage(rightChildPageNum)
 	leftChildPageNum := t.pager.getUnusedPageNum()
 	leftChildHeader, leftChildBody := t.pager.getPage(leftChildPageNum)
 	leftChild := LeafPage{header: leftChildHeader, body: (*LeafPageBody)(leftChildBody)}
@@ -172,7 +168,6 @@ func (t *Table) createNewRoot(rightChildPageNum uint32_t) {
 	copy((*[PageBodySize]byte)(leftChildBody)[:], (*[PageBodySize]byte)(rootBody)[:])
 	leftChild.setNodeRoot(false)
 
-	//internalNode := InternalPage{header: new(PageHeader), body: new(InternalPageBody)}
 	newRootHeader := new(PageHeader)
 	newRootBody := new(InternalPageBody)
 	newRoot := InternalPage{header: newRootHeader, body: newRootBody}
@@ -352,19 +347,20 @@ func (t *Table) internalNodeInsert(parentPageNum, childPageNum uint32_t) {
 	}
 
 	rightChildPageNum := *parentPage.internalNodeRightChild()
-	rightChildHeader, _ := t.pager.getPage(rightChildPageNum)
+	rightChildHeader, rightChildBody := t.pager.getPage(rightChildPageNum)
 
 	var rightChildMaxKey uint32_t
 	if rightChildHeader.pageType == PageLeaf {
-		rightChildPage := LeafPage{header: childHeader, body: (*LeafPageBody)(childBody)}
+		rightChildPage := &LeafPage{header: rightChildHeader, body: (*LeafPageBody)(rightChildBody)}
 		rightChildMaxKey = rightChildPage.getMaxKey()
 	} else {
-		rightChildPage := InternalPage{header: childHeader, body: (*InternalPageBody)(childBody)}
+		rightChildPage := &InternalPage{header: rightChildHeader, body: (*InternalPageBody)(rightChildBody)}
 		rightChildMaxKey = rightChildPage.getMaxKey()
 	}
 	if childMaxKey > rightChildMaxKey {
 		*parentPage.internalNodeChild(originalNumKeys) = rightChildPageNum
 		*parentPage.internalNodeKey(originalNumKeys) = rightChildMaxKey
+		*parentPage.internalNodeRightChild() = childPageNum
 	} else {
 		for i := originalNumKeys; i > index; i-- {
 			destination := parentPage.internalNodeCell(i)
