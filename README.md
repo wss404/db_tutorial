@@ -16,4 +16,4 @@
 12. 分裂节点后更新父节点。
 
 ### Tips
-序列化（serializeRow）、反序列化（deSerializeRow）函数以及移动节点cell的函数（moveTo）借鉴自bolted项目。
+序列化（serializeRow）、反序列化（deSerializeRow）函数以及移动节点cell的函数（moveTo）借鉴自boltdb项目。
